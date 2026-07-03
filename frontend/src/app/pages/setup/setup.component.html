@@ -1,0 +1,162 @@
+<div class="wizard">
+  <div class="wizard-inner">
+    <div class="wizard-brand">
+      <app-logo />
+      <p class="tagline">Your inbox, organized by the tide.</p>
+    </div>
+
+    <!-- Step indicator -->
+    <ol class="steps" aria-label="Setup progress">
+      <li [class.done]="step() > 1" [class.current]="step() === 1"><span>1</span> Connect Outlook</li>
+      <li [class.done]="step() > 2" [class.current]="step() === 2"><span>2</span> Connect AI</li>
+      <li [class.current]="step() === 3"><span>3</span> Preferences</li>
+    </ol>
+
+    <div class="card panel">
+      <!-- ============ STEP 1 ============ -->
+      @if (step() === 1) {
+        <h2>Connect your Outlook inbox</h2>
+        <p class="lead">
+          tidemail signs in with Microsoft’s device-code flow. You’ll need an Azure app registration
+          with <code>Mail.ReadWrite</code> and <code>User.Read</code> delegated permissions. Paste its
+          <strong>Application (client) ID</strong> below.
+        </p>
+
+        <div class="field">
+          <label for="clientId">Application (client) ID</label>
+          <input
+            id="clientId"
+            class="input mono"
+            [ngModel]="clientId()"
+            (ngModelChange)="clientId.set($event)"
+            placeholder="00000000-0000-0000-0000-000000000000"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+
+        @if (authError()) {
+          <p class="field-error" role="alert">{{ authError() }}</p>
+        }
+
+        @if (authVerified()) {
+          <p class="ok-line" role="status">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Outlook connected
+          </p>
+        } @else {
+          <button class="btn btn-primary" (click)="verifyConnection()" [disabled]="!clientId().trim() || authPolling()">
+            @if (authPolling()) { <span class="spinner"></span> Waiting for sign-in… } @else { Verify connection }
+          </button>
+        }
+
+        <div class="nav-row">
+          <span></span>
+          <button class="btn btn-accent" (click)="next()" [disabled]="!authVerified()">Continue</button>
+        </div>
+      }
+
+      <!-- ============ STEP 2 ============ -->
+      @if (step() === 2) {
+        <h2>Connect your AI provider</h2>
+        <p class="lead">Pick a provider to prefill its endpoint, then add your API key and model name.</p>
+
+        <div class="field">
+          <label for="provider">Provider</label>
+          <select
+            id="provider"
+            class="select"
+            [ngModel]="provider()"
+            (ngModelChange)="onProviderChange($event)"
+          >
+            <option value="eden">Eden AI</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="baseUrl">API base URL</label>
+          <input id="baseUrl" class="input mono" [ngModel]="baseUrl()" (ngModelChange)="baseUrl.set($event)" placeholder="https://…" />
+        </div>
+
+        <div class="grid-2">
+          <div class="field">
+            <label for="apiKey">API key</label>
+            <input id="apiKey" class="input mono" type="password" [ngModel]="apiKey()" (ngModelChange)="apiKey.set($event)" autocomplete="off" placeholder="sk-…" />
+          </div>
+          <div class="field">
+            <label for="model">Model name</label>
+            <input id="model" class="input mono" [ngModel]="model()" (ngModelChange)="model.set($event)" placeholder="gpt-4o-mini" />
+          </div>
+        </div>
+
+        <div class="test-row">
+          <button class="btn btn-ghost" (click)="testAi()" [disabled]="testing() || !apiKey() || !model().trim()">
+            @if (testing()) { <span class="spinner spinner--dark"></span> Testing… } @else { Test connection }
+          </button>
+          @if (testResult(); as r) {
+            <span class="test-result" [class.ok]="r.ok" [class.bad]="!r.ok" role="status">
+              {{ r.ok ? '✓ ' + r.message : '✕ ' + r.message }}
+            </span>
+          }
+        </div>
+
+        <div class="nav-row">
+          <button class="btn btn-ghost" (click)="back()">Back</button>
+          <button class="btn btn-accent" (click)="next()" [disabled]="!apiKey() || !model().trim()">Continue</button>
+        </div>
+      }
+
+      <!-- ============ STEP 3 ============ -->
+      @if (step() === 3) {
+        <h2>Preferences</h2>
+        <p class="lead">Tune how often tidemail checks your inbox and how folders are organized.</p>
+
+        <div class="field">
+          <label for="interval">Check interval — every {{ interval() }} minute{{ interval() === 1 ? '' : 's' }}</label>
+          <input id="interval" type="range" min="1" max="30" [ngModel]="interval()" (ngModelChange)="interval.set(+$event)" />
+        </div>
+
+        <div class="grid-2">
+          <div class="field">
+            <label for="maxFolders">Max folder count</label>
+            <input id="maxFolders" class="input" type="number" min="1" max="50" [ngModel]="maxFolders()" (ngModelChange)="maxFolders.set(+$event)" />
+          </div>
+          <div class="field">
+            <label for="parentFolder">Parent folder name</label>
+            <input id="parentFolder" class="input" [ngModel]="parentFolder()" (ngModelChange)="parentFolder.set($event)" />
+          </div>
+        </div>
+
+        @if (finishError()) {
+          <p class="field-error" role="alert">{{ finishError() }}</p>
+        }
+
+        <div class="nav-row">
+          <button class="btn btn-ghost" (click)="back()">Back</button>
+          <button class="btn btn-primary" (click)="finish()" [disabled]="!canFinish || finishing()">
+            @if (finishing()) { <span class="spinner"></span> Starting… } @else { Start tidemail }
+          </button>
+        </div>
+      }
+    </div>
+  </div>
+</div>
+
+<!-- Device-code modal -->
+@if (deviceFlow(); as flow) {
+  <div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="dc-title">
+    <div class="modal card">
+      <h3 id="dc-title">Finish signing in</h3>
+      <p>Open the verification page and enter this code:</p>
+      <div class="code" aria-label="Your device code">{{ flow.user_code }}</div>
+      <a class="btn btn-accent" [href]="flow.verification_uri" target="_blank" rel="noopener">
+        Open verification page
+      </a>
+      <p class="modal-hint">Waiting for you to complete sign-in… this window updates automatically.</p>
+      <button class="btn btn-ghost" (click)="cancelAuth()">Cancel</button>
+    </div>
+  </div>
+}

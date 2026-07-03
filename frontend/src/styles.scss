@@ -1,0 +1,379 @@
+/* tidemail — global design system
+   Semantic tokens first; components reference vars, never raw hex. */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* --- brand palette (Deep · Ocean · Teal · Cyan · Foam) --- */
+  --c-deep: #08243a;       /* deepest navy */
+  --c-ocean: #123b52;      /* ocean blue */
+  --c-teal: #0e8fa3;       /* teal */
+  --c-cyan: #26d4e2;       /* bright cyan */
+  --c-foam: #e9f5f8;       /* foam / near-white */
+  --c-teal-ink: #0a7183;   /* teal darkened for text contrast on light */
+  --c-coral: #ff6b6b;      /* urgent */
+  --c-coral-ink: #c53434;
+
+  /* --- semantic surfaces --- */
+  --bg: #eef2f6;           /* cool light blue-gray */
+  --surface: #ffffff;      /* cards, panels */
+  --surface-2: #e7edf3;    /* subtle raised / hover fill */
+  --surface-sunken: #eaf0f5;
+  --glass: rgba(255, 255, 255, 0.72);
+
+  /* --- text --- */
+  --text: #0e2233;         /* deep navy ink */
+  --text-muted: #52627a;
+  --text-subtle: #8695a8;
+  --text-on-accent: #04353a;
+  --text-on-primary: #eaf9fb;
+
+  /* --- lines & borders --- */
+  --border: #dbe3ec;
+  --border-strong: #c1cddb;
+
+  /* --- primary / accent semantic --- */
+  --primary: var(--c-deep);
+  --primary-hover: #0d2f4a;
+  --accent: var(--c-cyan);
+  --accent-strong: var(--c-teal-ink);
+  --danger: var(--c-coral);
+  --danger-ink: var(--c-coral-ink);
+  --success: #17a67e;
+  --success-bg: #e2f6f0;
+
+  /* --- gradients (the "tide" treatment) --- */
+  --grad-tide: linear-gradient(135deg, #1596a8 0%, #2ad4e0 100%);
+  --grad-deep: linear-gradient(160deg, #123b52 0%, #08243a 100%);
+  --grad-surface: linear-gradient(180deg, rgba(38, 212, 226, 0.06), rgba(38, 212, 226, 0) 60%);
+
+  /* --- display font --- */
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+
+  /* --- focus ring (accessibility P1) --- */
+  --focus: 0 0 0 3px rgba(38, 212, 226, 0.5);
+
+  /* --- spacing scale (4/8pt system) --- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+
+  /* --- radius (softer, more modern) --- */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+
+  /* --- elevation (soft, tinted with the brand navy) --- */
+  --shadow-sm: 0 1px 2px rgba(8, 36, 58, 0.05), 0 2px 6px rgba(8, 36, 58, 0.05);
+  --shadow-md: 0 6px 18px rgba(8, 36, 58, 0.09);
+  --shadow-lg: 0 18px 42px rgba(8, 36, 58, 0.16);
+  --shadow-glow: 0 8px 30px rgba(38, 212, 226, 0.28);
+
+  /* --- motion --- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --dur-fast: 160ms;
+  --dur-mid: 240ms;
+
+  /* --- fonts --- */
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+
+  --sidebar-w: 240px;
+}
+
+/* Dark mode: independently tuned, not a naive inversion. Applied automatically from
+   the OS preference, and overridable via a data-theme attribute on <html>. */
+@mixin dark-tokens {
+  --bg: #071522;
+  --surface: #0d1f30;
+  --surface-2: #142a3e;
+  --surface-sunken: #0a1a28;
+  --glass: rgba(13, 31, 48, 0.66);
+
+  --text: #e8eef7;
+  --text-muted: #9fb0c6;
+  --text-subtle: #6f8299;
+  --text-on-primary: #eaf9fb;
+  --text-on-accent: #04353a;
+
+  --border: #1c3247;
+  --border-strong: #294057;
+
+  --primary: #123b52;
+  --primary-hover: #184c68;
+  --accent: #26d4e2;
+  --accent-strong: #7fe9f1;
+  --danger: #ff7b7b;
+  --danger-ink: #ff9a9a;
+  --success: #2fcf9e;
+  --success-bg: #0d3730;
+
+  --grad-tide: linear-gradient(135deg, #1596a8 0%, #2ad4e0 100%);
+  --grad-deep: linear-gradient(160deg, #123b52 0%, #071522 100%);
+  --grad-surface: linear-gradient(180deg, rgba(38, 212, 226, 0.08), rgba(38, 212, 226, 0) 60%);
+
+  --focus: 0 0 0 3px rgba(38, 212, 226, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 18px 40px rgba(0, 0, 0, 0.6);
+  --shadow-glow: 0 8px 30px rgba(38, 212, 226, 0.28);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    @include dark-tokens;
+  }
+}
+:root[data-theme='dark'] {
+  @include dark-tokens;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+/* Tracked-out mono labels (the "BRAND EXPLORATION" style from the brand sheet) */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+a {
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+/* Visible focus ring on every interactive element (a11y P1) */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+  border-radius: var(--r-sm);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* --- reusable button system --- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  padding: 0 var(--sp-4);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  font-size: 14px;
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--primary);
+  color: var(--text-on-primary);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+.btn-accent {
+  background: var(--grad-tide);
+  color: #04353a;
+  box-shadow: var(--shadow-sm);
+}
+.btn-accent:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-1px);
+}
+.btn-ghost {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.btn-danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger-ink);
+}
+.btn-danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.08);
+}
+
+/* --- form controls --- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.input,
+.select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 var(--sp-3);
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.input:hover,
+.select:hover {
+  border-color: var(--accent-strong);
+}
+.input::placeholder {
+  color: var(--text-subtle);
+}
+.field-error {
+  font-size: 12.5px;
+  color: var(--danger-ink);
+}
+
+/* --- card --- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Interactive card / row: modern hover-lift with a tide-tinted glow */
+.hoverable {
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+  will-change: transform;
+}
+.hoverable:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+/* --- scroll reveal (driven by the [reveal] directive) --- */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.5s var(--ease-out), transform 0.5s var(--ease-out);
+}
+[data-reveal].is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* --- skeleton loader --- */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-sunken) 37%, var(--surface-2) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+  border-radius: var(--r-sm);
+}
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+
+/* Visually-hidden but screen-reader available */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 640px) {
+  .input,
+  .select {
+    font-size: 16px; /* prevents iOS auto-zoom */
+  }
+}
+
+/* Respect reduced motion (a11y P1) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
