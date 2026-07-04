@@ -1,6 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { animate, style, transition, trigger } from '@angular/animations';
 import { EmailRowComponent } from '../../components/email-row/email-row.component';
+import { StatCardComponent } from '../../components/stat-card/stat-card.component';
 import { ApiService } from '../../services/api.service';
 import { PollerService } from '../../services/poller.service';
 import { RevealDirective } from '../../directives/reveal.directive';
@@ -8,7 +9,7 @@ import { RevealDirective } from '../../directives/reveal.directive';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [EmailRowComponent, RevealDirective],
+  imports: [EmailRowComponent, StatCardComponent, RevealDirective],
   animations: [
     trigger('slideIn', [
       transition(':enter', [
@@ -70,19 +71,20 @@ import { RevealDirective } from '../../directives/reveal.directive';
     }
 
     <section class="stats" aria-label="Summary">
-      <div class="stat card hoverable" reveal [revealDelay]="0">
-        <span class="stat-label">Emails sorted today</span>
-        <span class="stat-value">{{ status()?.emails_sorted_today ?? 0 }}</span>
+      <div reveal [revealDelay]="0">
+        <app-stat-card title="Emails sorted today" [value]="status()?.emails_sorted_today ?? 0" subtext="filed into themed folders">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+        </app-stat-card>
       </div>
-      <div class="stat card hoverable" reveal [revealDelay]="60">
-        <span class="stat-label">Folders active</span>
-        <span class="stat-value">
-          @if (foldersLoading()) { <span class="skeleton stat-skel"></span> } @else { {{ foldersActive() }} }
-        </span>
+      <div reveal [revealDelay]="60">
+        <app-stat-card title="Folders active" [value]="foldersActive()" [loading]="foldersLoading()" subtext="themes tidemail created">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+        </app-stat-card>
       </div>
-      <div class="stat card hoverable" reveal [revealDelay]="120">
-        <span class="stat-label">Urgent flagged</span>
-        <span class="stat-value stat-value--urgent">{{ status()?.urgent_flagged_today ?? 0 }}</span>
+      <div reveal [revealDelay]="120">
+        <app-stat-card title="Urgent flagged" [value]="status()?.urgent_flagged_today ?? 0" subtext="need your attention" variant="urgent">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg>
+        </app-stat-card>
       </div>
     </section>
 

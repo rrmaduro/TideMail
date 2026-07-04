@@ -19,18 +19,33 @@ import classifier
 import config as config_module
 import graph
 import watcher
+from paths import FRONTEND_DIST
 
-HOST = "127.0.0.1"
+HOST = "127.0.0.1"  # bind to loopback only — tidemail is a local, single-user app
 PORT = 8000
 
-app = FastAPI(title="tidemail")
+app = FastAPI(title="tidemail", docs_url=None, redoc_url=None, openapi_url=None)
 
+# CORS is only needed for the Angular dev server (ng serve on :4200). In production the
+# SPA is served same-origin by this app, so no cross-origin requests occur.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:4200", "http://127.0.0.1:4200"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """Defense-in-depth headers. The app is local-only, but these cost nothing and
+    harden against clickjacking / MIME-sniffing if a browser ever mishandles a response."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    return response
 
 # All endpoints live under /api so they never collide with the SPA's client-side
 # routes (e.g. /folders, /activity), which must fall through to index.html.
@@ -243,11 +258,7 @@ class SPAStaticFiles(StaticFiles):
             raise
 
 
-# The Angular `application` builder emits into dist/browser; fall back to dist for other setups.
-# app.py lives in backend/, so the repo-root frontend is one level up.
-_dist = Path(__file__).parent.parent / "frontend" / "dist"
-FRONTEND_DIST = _dist / "browser" if (_dist / "browser" / "index.html").exists() else _dist
-
+# FRONTEND_DIST is resolved in paths.py (works from source and when packaged).
 if (FRONTEND_DIST / "index.html").exists():
     # Mounted last, so the API routes above take precedence; everything else is the SPA.
     app.mount("/", SPAStaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
