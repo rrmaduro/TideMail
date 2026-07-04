@@ -1,0 +1,4 @@
+# Extra tooling for building the packaged desktop app.
+# Install with:  pip install -r requirements-dev.txt
+-r requirements.txt
+pyinstaller>=6.6

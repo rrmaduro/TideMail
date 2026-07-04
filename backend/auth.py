@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 from typing import Optional
 
 import msal
 
-DATA_DIR = Path(__file__).parent / "data"
+from paths import DATA_DIR
+
 TOKEN_CACHE_PATH = DATA_DIR / "token_cache.bin"
 AUTHORITY = "https://login.microsoftonline.com/common"
 SCOPES = ["Mail.ReadWrite", "User.Read"]

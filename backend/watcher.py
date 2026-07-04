@@ -13,8 +13,8 @@ import auth
 import classifier
 import config as config_module
 import graph
+from paths import DATA_DIR
 
-DATA_DIR = Path(__file__).parent / "data"
 PROCESSED_PATH = DATA_DIR / "processed.json"
 ACTIVITY_PATH = DATA_DIR / "activity.json"
 

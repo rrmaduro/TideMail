@@ -7,7 +7,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-DATA_DIR = Path(__file__).parent / "data"
+from paths import DATA_DIR
+
 CONFIG_PATH = DATA_DIR / "config.json"
 SECRETS_PATH = DATA_DIR / "secrets.json"
 
