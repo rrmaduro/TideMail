@@ -2,7 +2,7 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
-import { ActivityItem } from '../../services/models';
+import { ActivityItem, ActivitySummary } from '../../services/models';
 import { FolderChipComponent } from '../../components/folder-chip/folder-chip.component';
 import { UrgentBadgeComponent } from '../../components/urgent-badge/urgent-badge.component';
 import { RevealDirective } from '../../directives/reveal.directive';
@@ -28,10 +28,24 @@ import { downloadCsv, downloadJson } from '../../services/download';
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           JSON
         </button>
+        <button class="btn btn-danger" (click)="clearLog()" [disabled]="exporting()">Clear</button>
       </div>
     </header>
 
+    @if (summary(); as s) {
+      <div class="summary" reveal>
+        <div class="sum-item card"><span class="sum-n">{{ s.total }}</span><span class="sum-l">Processed</span></div>
+        <div class="sum-item card"><span class="sum-n ok">{{ s.sorted }}</span><span class="sum-l">Sorted</span></div>
+        <div class="sum-item card"><span class="sum-n bad">{{ s.skipped }}</span><span class="sum-l">Skipped</span></div>
+        <div class="sum-item card"><span class="sum-n urgent">{{ s.urgent }}</span><span class="sum-l">Urgent</span></div>
+      </div>
+    }
+
     <div class="filters card">
+      <div class="field search-field">
+        <label for="q">Search</label>
+        <input id="q" class="input" placeholder="Sender or subject…" [ngModel]="query()" (ngModelChange)="onSearch($event)" />
+      </div>
       <div class="field">
         <label for="folderFilter">Folder</label>
         <select id="folderFilter" class="select" [ngModel]="folder()" (ngModelChange)="onFilter('folder', $event)">
@@ -122,20 +136,28 @@ export class ActivityComponent implements OnInit {
   sinceDate = signal('');
   untilDate = signal('');
   urgentOnly = signal(false);
+  query = signal('');
   exporting = signal(false);
+  summary = signal<ActivitySummary | null>(null);
 
   expanded = signal<Set<string>>(new Set());
+  private searchDebounce?: ReturnType<typeof setTimeout>;
 
   ngOnInit(): void {
     this.api.getFolders().subscribe({
       next: (res) => this.folderNames.set(res.folders.map((f) => f.name)),
       error: () => {},
     });
+    this.loadSummary();
     this.load();
   }
 
   totalPages(): number {
     return Math.max(1, Math.ceil(this.total() / this.pageSize));
+  }
+
+  private loadSummary(): void {
+    this.api.getActivitySummary().subscribe({ next: (s) => this.summary.set(s), error: () => {} });
   }
 
   private load(): void {
@@ -146,6 +168,7 @@ export class ActivityComponent implements OnInit {
         since: this.sinceDate() ? new Date(this.sinceDate()).toISOString() : undefined,
         until: this.untilDate() ? new Date(this.untilDate() + 'T23:59:59').toISOString() : undefined,
         urgent_only: this.urgentOnly() || undefined,
+        q: this.query().trim() || undefined,
         page: this.page(),
         page_size: this.pageSize,
       })
@@ -157,6 +180,25 @@ export class ActivityComponent implements OnInit {
         },
         error: () => this.loading.set(false),
       });
+  }
+
+  onSearch(value: string): void {
+    this.query.set(value);
+    this.page.set(1);
+    clearTimeout(this.searchDebounce);
+    this.searchDebounce = setTimeout(() => this.load(), 250);
+  }
+
+  clearLog(): void {
+    if (!confirm('Clear the entire activity log? This does not touch your email — only the local log.')) return;
+    this.api.clearActivity().subscribe({
+      next: () => {
+        this.page.set(1);
+        this.loadSummary();
+        this.load();
+      },
+      error: () => {},
+    });
   }
 
   /** Fetch all activity matching the current filters, across pages, for export. */
@@ -172,6 +214,7 @@ export class ActivityComponent implements OnInit {
             since: this.sinceDate() ? new Date(this.sinceDate()).toISOString() : undefined,
             until: this.untilDate() ? new Date(this.untilDate() + 'T23:59:59').toISOString() : undefined,
             urgent_only: this.urgentOnly() || undefined,
+            q: this.query().trim() || undefined,
             page,
             page_size: size,
           })

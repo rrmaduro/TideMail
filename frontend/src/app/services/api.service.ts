@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   ActivityPage,
+  ActivitySummary,
   AppConfig,
   AuthStatus,
   ConfigUpdate,
@@ -47,6 +48,7 @@ export class ApiService {
     since?: string;
     until?: string;
     urgent_only?: boolean;
+    q?: string;
     page?: number;
     page_size?: number;
   } = {}): Observable<ActivityPage> {
@@ -55,6 +57,12 @@ export class ApiService {
       if (v !== undefined && v !== null && v !== '') query[k] = String(v);
     }
     return this.http.get<ActivityPage>(`${this.base}/activity`, { params: query });
+  }
+  getActivitySummary(): Observable<ActivitySummary> {
+    return this.http.get<ActivitySummary>(`${this.base}/activity/summary`);
+  }
+  clearActivity(): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`${this.base}/activity/clear`, {});
   }
 
   // --- folders ---
@@ -66,6 +74,15 @@ export class ApiService {
       `${this.base}/folders/${encodeURIComponent(folderId)}/emails`,
       { params: { top: String(top) } },
     );
+  }
+  renameFolder(folderId: string, name: string): Observable<{ id: string; name: string }> {
+    return this.http.patch<{ id: string; name: string }>(
+      `${this.base}/folders/${encodeURIComponent(folderId)}`,
+      { name },
+    );
+  }
+  deleteFolder(folderId: string): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`${this.base}/folders/${encodeURIComponent(folderId)}`);
   }
 
   // --- config ---

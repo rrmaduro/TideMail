@@ -20,9 +20,12 @@ class AppConfig(BaseModel):
     provider: str = "openai"
     base_url: str = ""
     model: str = ""
-    check_interval_minutes: int = Field(default=5, ge=1, le=30)
+    check_interval_minutes: int = Field(default=5, ge=1, le=60)
     max_folder_count: int = Field(default=10, ge=1, le=50)
     parent_folder_name: str = "AI Sorted"
+    max_scan_messages: int = Field(default=500, ge=10, le=5000)
+    overflow_folder_name: str = "Misc"
+    auto_scan: bool = False
 
 
 class Secrets(BaseModel):
@@ -36,9 +39,12 @@ class ConfigUpdate(BaseModel):
     provider: Optional[str] = None
     base_url: Optional[str] = None
     model: Optional[str] = None
-    check_interval_minutes: Optional[int] = Field(default=None, ge=1, le=30)
+    check_interval_minutes: Optional[int] = Field(default=None, ge=1, le=60)
     max_folder_count: Optional[int] = Field(default=None, ge=1, le=50)
     parent_folder_name: Optional[str] = None
+    max_scan_messages: Optional[int] = Field(default=None, ge=10, le=5000)
+    overflow_folder_name: Optional[str] = None
+    auto_scan: Optional[bool] = None
     api_key: Optional[str] = None
 
 

@@ -183,3 +183,15 @@ def list_messages_in_folder(token: str, folder_id: str, top: int = 5) -> list[di
         params={"$top": str(top), "$select": MESSAGE_SELECT, "$orderby": "receivedDateTime desc"},
     )
     return data.get("value", [])
+
+
+def rename_folder(token: str, folder_id: str, new_name: str) -> dict:
+    updated = _request("PATCH", f"/me/mailFolders/{folder_id}", token, json={"displayName": new_name})
+    _folder_cache.clear()  # names changed; drop the cached name->id map
+    return updated
+
+
+def delete_folder(token: str, folder_id: str) -> None:
+    """Delete a folder (Graph moves it and its contents to Deleted Items — recoverable)."""
+    _request("DELETE", f"/me/mailFolders/{folder_id}", token)
+    _folder_cache.clear()

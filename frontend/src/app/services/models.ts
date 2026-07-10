@@ -10,8 +10,12 @@ export interface AppConfig {
   check_interval_minutes: number;
   max_folder_count: number;
   parent_folder_name: string;
+  max_scan_messages: number;
+  overflow_folder_name: string;
+  auto_scan: boolean;
   ai_configured?: boolean;
   authenticated?: boolean;
+  data_dir?: string;
 }
 
 export interface ConfigUpdate {
@@ -22,7 +26,17 @@ export interface ConfigUpdate {
   check_interval_minutes?: number;
   max_folder_count?: number;
   parent_folder_name?: string;
+  max_scan_messages?: number;
+  overflow_folder_name?: string;
+  auto_scan?: boolean;
   api_key?: string;
+}
+
+export interface ActivitySummary {
+  total: number;
+  sorted: number;
+  skipped: number;
+  urgent: number;
 }
 
 export interface ScanProgress {

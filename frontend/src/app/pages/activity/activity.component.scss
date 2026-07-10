@@ -19,6 +19,49 @@ h1 {
   display: flex;
   gap: var(--sp-2);
 }
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.sum-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-4);
+}
+.sum-n {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.sum-n.ok {
+  color: var(--success);
+}
+.sum-n.bad {
+  color: var(--danger-ink);
+}
+.sum-n.urgent {
+  color: var(--danger-ink);
+}
+.sum-l {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.search-field {
+  flex: 1;
+  min-width: 200px;
+}
+@media (max-width: 640px) {
+  .summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
 .log-row {
   transition: background var(--dur-fast) var(--ease-out);
 }

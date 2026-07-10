@@ -29,7 +29,10 @@ import { RevealDirective } from '../../directives/reveal.directive';
       <div>
         <span class="eyebrow">Dashboard</span>
         <h1>Your Inbox</h1>
-        <p class="sub">Sorts <strong>every</strong> email in your inbox into themed folders — one full pass.</p>
+        <p class="sub">
+          Sorts <strong>every</strong> email in your inbox into themed folders — one full pass.
+          @if (lastScan()) { <span class="last-scan">· Last sorted {{ lastScan() }}</span> }
+        </p>
       </div>
       <button class="btn btn-accent scan-btn" (click)="scan()" [disabled]="scanning()">
         @if (scanning()) {
@@ -131,6 +134,9 @@ import { RevealDirective } from '../../directives/reveal.directive';
         margin: var(--sp-1) 0 0;
         color: var(--text-muted);
         font-size: 14px;
+      }
+      .last-scan {
+        color: var(--text-subtle);
       }
       .scan-btn {
         min-height: 46px;
@@ -334,6 +340,19 @@ export class DashboardComponent implements OnInit {
   foldersActive = computed(() => {
     if (this.folderCount() > 0) return this.folderCount();
     return new Set(this.recent().map((r) => r.folder)).size;
+  });
+
+  lastScan = computed(() => {
+    const ts = this.status()?.last_scan;
+    if (!ts) return '';
+    const diff = Date.now() - new Date(ts).getTime();
+    if (Number.isNaN(diff)) return '';
+    const m = Math.round(diff / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.round(h / 24)}d ago`;
   });
 
   ngOnInit(): void {

@@ -17,6 +17,7 @@ if not os.path.exists(os.path.join(FRONTEND_DIST, "index.html")):
 
 hiddenimports = (
     collect_submodules("uvicorn")
+    + collect_submodules("webview")  # pywebview native window backends
     + [
         "uvicorn.logging",
         "uvicorn.loops.auto",

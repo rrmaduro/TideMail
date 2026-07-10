@@ -1,12 +1,10 @@
 """tidemail FastAPI backend. Run with: python app.py"""
 from __future__ import annotations
 
-import threading
-import webbrowser
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-import uvicorn
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -19,19 +17,30 @@ import classifier
 import config as config_module
 import graph
 import watcher
-from paths import FRONTEND_DIST
+from paths import DATA_DIR, FRONTEND_DIST
 
 HOST = "127.0.0.1"  # bind to loopback only — tidemail is a local, single-user app
 PORT = 8000
 
-app = FastAPI(title="tidemail", docs_url=None, redoc_url=None, openapi_url=None)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Resume periodic scanning on boot if the user enabled auto-scan.
+    cfg = config_module.load_config()
+    if cfg.auto_scan:
+        watcher.start(cfg.check_interval_minutes)
+    yield
+    await watcher.stop()
+
+
+app = FastAPI(title="tidemail", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
 # CORS is only needed for the Angular dev server (ng serve on :4200). In production the
 # SPA is served same-origin by this app, so no cross-origin requests occur.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:4200", "http://127.0.0.1:4200"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
@@ -98,12 +107,24 @@ def get_activity(
     since: Optional[str] = None,
     until: Optional[str] = None,
     urgent_only: bool = False,
+    q: Optional[str] = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),
 ):
     return watcher.get_activity(
-        folder=folder, since=since, until=until, urgent_only=urgent_only, page=page, page_size=page_size
+        folder=folder, since=since, until=until, urgent_only=urgent_only, q=q, page=page, page_size=page_size
     )
+
+
+@api.get("/activity/summary")
+def get_activity_summary():
+    return watcher.get_activity_summary()
+
+
+@api.post("/activity/clear")
+def clear_activity():
+    watcher.clear_activity()
+    return {"ok": True}
 
 
 # ---------- folders ----------
@@ -157,6 +178,41 @@ def get_folder_emails(folder_id: str, top: int = Query(default=5, ge=1, le=50)):
     return {"messages": messages}
 
 
+class FolderRenameRequest(BaseModel):
+    name: str
+
+
+def _folder_token():
+    cfg = config_module.get_full_config()
+    try:
+        return auth.get_token(cfg["client_id"])
+    except (auth.AuthNotConfigured, auth.AuthRequired) as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+@api.patch("/folders/{folder_id}")
+def rename_folder(folder_id: str, body: FolderRenameRequest):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Folder name cannot be empty")
+    token = _folder_token()
+    try:
+        updated = graph.rename_folder(token, folder_id, name)
+    except graph.GraphAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"id": updated.get("id", folder_id), "name": updated.get("displayName", name)}
+
+
+@api.delete("/folders/{folder_id}")
+def delete_folder(folder_id: str):
+    token = _folder_token()
+    try:
+        graph.delete_folder(token, folder_id)
+    except graph.GraphAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"ok": True}
+
+
 # ---------- config ----------
 
 
@@ -166,6 +222,7 @@ def get_config():
         **config_module.load_config().model_dump(),
         "ai_configured": config_module.is_ai_configured(),
         "authenticated": auth.is_authenticated(),
+        "data_dir": str(DATA_DIR),
     }
 
 
@@ -269,10 +326,7 @@ else:
         return {"message": "tidemail backend is running. Frontend not built yet — see /docs for the API."}
 
 
-def _open_browser():
-    webbrowser.open(f"http://{HOST}:{PORT}")
-
-
 if __name__ == "__main__":
-    threading.Timer(1.5, _open_browser).start()
-    uvicorn.run(app, host=HOST, port=PORT)
+    import desktop
+
+    desktop.run(app)

@@ -78,7 +78,8 @@ cd frontend && npm install && npm run build && cd ..
 python backend/app.py
 ```
 
-This serves the app at <http://127.0.0.1:8000> and opens your browser. A first-run wizard walks you
+This opens tidemail in its own **native desktop window** (no browser needed — it falls back to your
+browser only if a system webview isn't available). A first-run wizard walks you
 through connecting Outlook and your AI provider. See [**INSTALL.md**](INSTALL.md) for a packaged,
 double-click desktop build (no terminal needed).
 

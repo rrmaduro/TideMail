@@ -37,6 +37,10 @@ dist/tidemail.exe        (Windows)
 dist/tidemail            (macOS / Linux)
 ```
 
+The packaged app opens in its **own native desktop window** (no browser tab) via the OS webview
+(Edge WebView2 on Windows, WebKit on macOS, WebKitGTK on Linux). If no native webview is available it
+falls back to opening your default browser.
+
 Double-click it to launch. It opens your browser automatically at <http://127.0.0.1:8000>.
 
 > [!NOTE]

@@ -89,6 +89,7 @@ def get_activity(
     since: Optional[str] = None,
     until: Optional[str] = None,
     urgent_only: bool = False,
+    q: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -102,11 +103,34 @@ def get_activity(
         activity = [a for a in activity if a["timestamp"] >= since]
     if until:
         activity = [a for a in activity if a["timestamp"] <= until]
+    if q:
+        needle = q.lower()
+        activity = [
+            a
+            for a in activity
+            if needle in a.get("sender_name", "").lower()
+            or needle in a.get("sender_address", "").lower()
+            or needle in a.get("subject", "").lower()
+        ]
 
     total = len(activity)
     start = (page - 1) * page_size
     page_items = activity[start : start + page_size]
     return {"items": page_items, "total": total, "page": page, "page_size": page_size}
+
+
+def get_activity_summary() -> dict:
+    activity = _load_activity()
+    return {
+        "total": len(activity),
+        "sorted": sum(1 for a in activity if not a.get("error")),
+        "skipped": sum(1 for a in activity if a.get("error")),
+        "urgent": sum(1 for a in activity if a.get("urgent")),
+    }
+
+
+def clear_activity() -> None:
+    _write_json(ACTIVITY_PATH, [])
 
 
 def _base_entry(message: dict) -> dict:
@@ -131,7 +155,13 @@ def _chunks(items: list, size: int):
 
 
 async def _file_message(
-    token: str, message: dict, result, parent_folder_name: str, max_folders: int, existing_folders: list[str]
+    token: str,
+    message: dict,
+    result,
+    parent_folder_name: str,
+    max_folders: int,
+    existing_folders: list[str],
+    overflow_folder: str = OVERFLOW_FOLDER,
 ) -> dict:
     """Move an already-classified message into its theme folder and build its log entry.
 
@@ -139,7 +169,7 @@ async def _file_message(
     """
     target_folder = result.folder
     if target_folder not in existing_folders and len(existing_folders) >= max_folders:
-        target_folder = OVERFLOW_FOLDER
+        target_folder = overflow_folder
     if target_folder not in existing_folders:
         existing_folders.append(target_folder)
 
@@ -179,8 +209,10 @@ async def run_scan() -> dict:
             token = await asyncio.to_thread(auth.get_token, cfg["client_id"])
             parent_folder_name = cfg["parent_folder_name"]
             max_folders = cfg["max_folder_count"]
+            overflow_folder = cfg.get("overflow_folder_name") or OVERFLOW_FOLDER
+            max_scan = cfg.get("max_scan_messages", MAX_SCAN_MESSAGES)
 
-            messages = await asyncio.to_thread(graph.list_all_inbox_messages, token, MAX_SCAN_MESSAGES)
+            messages = await asyncio.to_thread(graph.list_all_inbox_messages, token, max_scan)
             existing_raw = await asyncio.to_thread(graph.list_ai_folders, token, parent_folder_name)
             existing_folders = [f["displayName"] for f in existing_raw]
 
@@ -211,7 +243,7 @@ async def run_scan() -> dict:
                         entry = _error_entry(message, batch_error or "AI did not classify this email")
                     else:
                         entry = await _file_message(
-                            token, message, result, parent_folder_name, max_folders, existing_folders
+                            token, message, result, parent_folder_name, max_folders, existing_folders, overflow_folder
                         )
 
                     _append_activity(entry)

@@ -3,6 +3,8 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ApiService } from '../../services/api.service';
 import { AiProvider } from '../../services/models';
+import { ThemeService, ThemePref } from '../../services/theme.service';
+import { RevealDirective } from '../../directives/reveal.directive';
 
 const PROVIDER_BASE: Record<AiProvider, string> = {
   eden: 'https://api.edenai.run/v2',
@@ -14,12 +16,33 @@ const PROVIDER_BASE: Record<AiProvider, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, RevealDirective],
   template: `
     <header class="head">
-      <h1>Settings</h1>
-      <p class="sub">Update your AI provider, preferences, and connection at any time.</p>
+      <span class="eyebrow">Settings</span>
+      <h1>Preferences &amp; connections</h1>
+      <p class="sub">Everything is stored locally on your machine and remembered between launches.</p>
     </header>
+
+    <!-- Appearance -->
+    <section class="card block" reveal>
+      <h2>Appearance</h2>
+      <div class="field">
+        <label>Theme</label>
+        <div class="seg">
+          @for (t of themes; track t.value) {
+            <button
+              class="seg-btn"
+              [class.active]="theme.pref() === t.value"
+              (click)="theme.set(t.value)"
+              type="button"
+            >
+              {{ t.label }}
+            </button>
+          }
+        </div>
+      </div>
+    </section>
 
     <!-- AI provider -->
     <section class="card block">
@@ -57,23 +80,49 @@ const PROVIDER_BASE: Record<AiProvider, string> = {
       </div>
     </section>
 
-    <!-- Preferences -->
-    <section class="card block">
-      <h2>Preferences</h2>
-      <div class="field">
-        <label for="interval">Check interval — every {{ interval() }} minute{{ interval() === 1 ? '' : 's' }}</label>
-        <input id="interval" type="range" min="1" max="30" [ngModel]="interval()" (ngModelChange)="interval.set(+$event)" />
-      </div>
+    <!-- Sorting preferences -->
+    <section class="card block" reveal>
+      <h2>Sorting</h2>
       <div class="grid-2">
-        <div class="field">
-          <label for="maxFolders">Max folder count</label>
-          <input id="maxFolders" class="input" type="number" min="1" max="50" [ngModel]="maxFolders()" (ngModelChange)="maxFolders.set(+$event)" />
-        </div>
         <div class="field">
           <label for="parentFolder">Parent folder name</label>
           <input id="parentFolder" class="input" [ngModel]="parentFolder()" (ngModelChange)="parentFolder.set($event)" />
+          <span class="hint">Folders are created under this in Outlook.</span>
+        </div>
+        <div class="field">
+          <label for="overflow">Overflow folder name</label>
+          <input id="overflow" class="input" [ngModel]="overflowFolder()" (ngModelChange)="overflowFolder.set($event)" />
+          <span class="hint">Where mail lands once the folder cap is reached.</span>
         </div>
       </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="maxFolders">Max folders — {{ maxFolders() }}</label>
+          <input id="maxFolders" type="range" min="1" max="50" [ngModel]="maxFolders()" (ngModelChange)="maxFolders.set(+$event)" />
+        </div>
+        <div class="field">
+          <label for="maxScan">Max emails per scan — {{ maxScan() }}</label>
+          <input id="maxScan" type="range" min="10" max="2000" step="10" [ngModel]="maxScan()" (ngModelChange)="maxScan.set(+$event)" />
+        </div>
+      </div>
+    </section>
+
+    <!-- Automation -->
+    <section class="card block" reveal>
+      <h2>Automation</h2>
+      <label class="toggle-row">
+        <span>
+          <strong>Auto-scan on a schedule</strong>
+          <span class="hint">Re-sorts your inbox automatically in the background.</span>
+        </span>
+        <input type="checkbox" class="switch" [ngModel]="autoScan()" (ngModelChange)="autoScan.set($event)" />
+      </label>
+      @if (autoScan()) {
+        <div class="field" reveal>
+          <label for="interval">Every {{ interval() }} minute{{ interval() === 1 ? '' : 's' }}</label>
+          <input id="interval" type="range" min="1" max="60" [ngModel]="interval()" (ngModelChange)="interval.set(+$event)" />
+        </div>
+      }
     </section>
 
     <div class="save-bar">
@@ -85,8 +134,14 @@ const PROVIDER_BASE: Record<AiProvider, string> = {
     </div>
 
     <!-- Danger zone -->
-    <section class="card block danger">
+    <section class="card block danger" reveal>
       <h2>Connection & data</h2>
+      @if (dataDir()) {
+        <div class="data-loc">
+          <span class="hint">Your settings, key, and sign-in are stored locally at:</span>
+          <code class="mono">{{ dataDir() }}</code>
+        </div>
+      }
       <div class="danger-row">
         <div>
           <strong>Disconnect Outlook</strong>
@@ -108,6 +163,13 @@ const PROVIDER_BASE: Record<AiProvider, string> = {
 export class SettingsComponent implements OnInit {
   private api = inject(ApiService);
   private router = inject(Router);
+  theme = inject(ThemeService);
+
+  readonly themes: { value: ThemePref; label: string }[] = [
+    { value: 'system', label: 'System' },
+    { value: 'light', label: 'Light' },
+    { value: 'dark', label: 'Dark' },
+  ];
 
   provider = signal<AiProvider>('openai');
   baseUrl = signal('');
@@ -116,6 +178,10 @@ export class SettingsComponent implements OnInit {
   interval = signal(5);
   maxFolders = signal(10);
   parentFolder = signal('AI Sorted');
+  overflowFolder = signal('Misc');
+  maxScan = signal(500);
+  autoScan = signal(false);
+  dataDir = signal('');
 
   testing = signal(false);
   testResult = signal<{ ok: boolean; message: string } | null>(null);
@@ -132,6 +198,10 @@ export class SettingsComponent implements OnInit {
       this.interval.set(c.check_interval_minutes);
       this.maxFolders.set(c.max_folder_count);
       this.parentFolder.set(c.parent_folder_name);
+      this.overflowFolder.set(c.overflow_folder_name ?? 'Misc');
+      this.maxScan.set(c.max_scan_messages ?? 500);
+      this.autoScan.set(c.auto_scan ?? false);
+      this.dataDir.set(c.data_dir ?? '');
     });
   }
 
@@ -174,11 +244,16 @@ export class SettingsComponent implements OnInit {
       check_interval_minutes: this.interval(),
       max_folder_count: this.maxFolders(),
       parent_folder_name: this.parentFolder().trim() || 'AI Sorted',
+      overflow_folder_name: this.overflowFolder().trim() || 'Misc',
+      max_scan_messages: this.maxScan(),
+      auto_scan: this.autoScan(),
     };
     if (this.apiKey()) update['api_key'] = this.apiKey();
 
     this.api.saveConfig(update).subscribe({
       next: () => {
+        // Reflect the auto-scan choice on the running watcher immediately.
+        (this.autoScan() ? this.api.start() : this.api.stop()).subscribe({ error: () => {} });
         this.saving.set(false);
         this.saved.set(true);
         this.apiKey.set('');
