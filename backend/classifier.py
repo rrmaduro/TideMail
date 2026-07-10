@@ -41,11 +41,14 @@ SYSTEM_PROMPT_TEMPLATE = (
     "so related mail lands together. Existing folders: {folders_list}\n"
     "- Only create a new folder when none of the existing ones fit, and only while fewer than "
     "{max_folders} folders exist (there are currently {folder_count}).\n"
+    "- Also give a MORE SPECIFIC subfolder within that theme for finer sorting, when one clearly "
+    "applies (e.g. Gaming -> \"Steam\", Finance -> \"Statements\", Shopping -> \"Orders\", "
+    "Travel -> \"Flights\"). Leave subfolder empty (\"\") if nothing specific fits.\n"
     "- Judge the full message (sender, subject, and body) — not just the subject line.\n"
     "- Flag urgent=true only for genuinely time-sensitive items needing prompt personal action "
     "(security alerts, deadlines, outages, payment failures), not routine promotions.\n\n"
     'Respond with ONLY a JSON object, no markdown fencing, in this exact shape: '
-    '{{"folder": "Broad Theme", "urgent": true|false, "reasoning": "one short sentence"}}'
+    '{{"folder": "Broad Theme", "subfolder": "Specific or empty", "urgent": true|false, "reasoning": "one short sentence"}}'
 )
 
 BATCH_SYSTEM_PROMPT_TEMPLATE = (
@@ -61,11 +64,14 @@ BATCH_SYSTEM_PROMPT_TEMPLATE = (
     "Strongly prefer reusing these existing folders when they fit: {folders_list}\n"
     "- Across the whole list, do not invent more than {max_folders} distinct folders total "
     "(there are currently {folder_count} existing).\n"
+    "- Also give a specific SUBFOLDER within the theme for finer sorting when one clearly applies "
+    "(e.g. Gaming -> \"Steam\", Finance -> \"Statements\"); use \"\" if none fits. Reuse subfolder "
+    "names consistently too.\n"
     "- Judge each full message (sender, subject, body), not just the subject.\n"
     "- urgent=true only for genuinely time-sensitive items needing prompt action.\n\n"
     "Respond with ONLY a JSON array, no markdown fencing — one object per email, covering EVERY "
     "index exactly once, in this shape:\n"
-    '[{{"index": 1, "folder": "Broad Theme", "urgent": false, "reasoning": "short"}}, ...]'
+    '[{{"index": 1, "folder": "Broad Theme", "subfolder": "Specific or empty", "urgent": false, "reasoning": "short"}}, ...]'
 )
 
 
@@ -75,6 +81,7 @@ class ClassificationResult:
     urgent: bool
     reasoning: str
     raw: str
+    subfolder: str = ""
 
 
 class ClassifierError(Exception):
@@ -309,6 +316,7 @@ def classify_email(email: dict, existing_folders: list[str], config: dict) -> Cl
 
     return ClassificationResult(
         folder=str(parsed.get("folder") or "Uncategorized").strip()[:60],
+        subfolder=str(parsed.get("subfolder", "") or "").strip()[:60],
         urgent=bool(parsed.get("urgent", False)),
         reasoning=str(parsed.get("reasoning", "")).strip(),
         raw=raw,
@@ -376,6 +384,7 @@ def classify_batch(
         results.append(
             ClassificationResult(
                 folder=str(item.get("folder") or "Uncategorized").strip()[:60],
+                subfolder=str(item.get("subfolder", "") or "").strip()[:60],
                 urgent=bool(item.get("urgent", False)),
                 reasoning=str(item.get("reasoning", "")).strip(),
                 raw=json.dumps(item),

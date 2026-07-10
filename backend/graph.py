@@ -9,7 +9,10 @@ from typing import Optional
 import httpx
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-MESSAGE_SELECT = "id,subject,from,receivedDateTime,bodyPreview,body"
+MESSAGE_SELECT = "id,subject,from,receivedDateTime,bodyPreview,body,parentFolderId"
+
+# Well-known Outlook folders scanned as "unsorted" sources, alongside the inbox.
+SOURCE_WELLKNOWN = ["inbox", "junkemail", "deleteditems"]
 
 # In-memory folder name -> id cache, keyed by (parent_name, folder_name). Rebuilt lazily
 # from Graph on first use each process run; not worth persisting to disk.
@@ -105,22 +108,31 @@ def ensure_parent_folder(token: str, parent_name: str) -> str:
     return folder_id
 
 
-def ensure_folder(token: str, parent_name: str, folder_name: str) -> str:
-    parent_id = ensure_parent_folder(token, parent_name)
-
-    cache_key = (parent_name, folder_name)
+def _ensure_child_of(token: str, parent_id: str, name: str, cache_key: tuple) -> str:
     if cache_key in _folder_cache:
         return _folder_cache[cache_key]
-
-    folder_id = _find_child_folder(token, parent_id, folder_name)
+    folder_id = _find_child_folder(token, parent_id, name)
     if not folder_id:
         created = _request(
-            "POST", f"/me/mailFolders/{parent_id}/childFolders", token, json={"displayName": folder_name}
+            "POST", f"/me/mailFolders/{parent_id}/childFolders", token, json={"displayName": name}
         )
         folder_id = created["id"]
-
     _folder_cache[cache_key] = folder_id
     return folder_id
+
+
+def ensure_folder(token: str, parent_name: str, folder_name: str) -> str:
+    parent_id = ensure_parent_folder(token, parent_name)
+    return _ensure_child_of(token, parent_id, folder_name, (parent_name, folder_name))
+
+
+def ensure_category_path(token: str, parent_name: str, category: str, subcategory: str = "") -> str:
+    """Ensure `AI Sorted / Category [/ Subcategory]` exists; return the deepest folder id."""
+    category_id = ensure_folder(token, parent_name, category)
+    subcategory = (subcategory or "").strip()
+    if not subcategory or subcategory.lower() == category.lower():
+        return category_id
+    return _ensure_child_of(token, category_id, subcategory, (parent_name, category, subcategory))
 
 
 def list_new_messages(token: str, since: Optional[datetime] = None, top: int = 25) -> list[dict]:
@@ -164,13 +176,76 @@ def move_message(token: str, message_id: str, destination_folder_id: str) -> Non
     _request("POST", f"/me/messages/{message_id}/move", token, json={"destinationId": destination_folder_id})
 
 
-def list_ai_folders(token: str, parent_name: str) -> list[dict]:
-    parent_id = ensure_parent_folder(token, parent_name)
+def _list_children(token: str, folder_id: str) -> list[dict]:
     data = _request(
         "GET",
-        f"/me/mailFolders/{parent_id}/childFolders",
+        f"/me/mailFolders/{folder_id}/childFolders",
         token,
-        params={"$select": "id,displayName,totalItemCount", "$top": "100"},
+        params={"$select": "id,displayName,totalItemCount,childFolderCount", "$top": "100"},
+    )
+    return data.get("value", [])
+
+
+def list_ai_folders(token: str, parent_name: str) -> list[dict]:
+    parent_id = ensure_parent_folder(token, parent_name)
+    return _list_children(token, parent_id)
+
+
+def list_category_folder_ids(token: str, parent_name: str) -> list[str]:
+    """IDs of the top-level category folders under the parent (not their subfolders)."""
+    return [f["id"] for f in list_ai_folders(token, parent_name)]
+
+
+def _read_folder_messages(token: str, ref: str, remaining: int, page_size: int = 50) -> list[dict]:
+    messages: list[dict] = []
+    next_url: Optional[str] = f"/me/mailFolders/{ref}/messages"
+    params: Optional[dict] = {
+        "$top": str(min(page_size, remaining)),
+        "$select": MESSAGE_SELECT,
+        "$orderby": "receivedDateTime desc",
+    }
+    while next_url and len(messages) < remaining:
+        data = _request("GET", next_url, token, params=params)
+        messages.extend(data.get("value", []))
+        next_url = data.get("@odata.nextLink")
+        params = None
+    return messages[:remaining]
+
+
+def list_scan_messages(token: str, parent_name: str, max_total: int = 500) -> list[dict]:
+    """Read messages to sort from across the mailbox: Inbox, Junk Email, Deleted Items,
+    and the top-level AI-Sorted category folders (so already-sorted mail can be refined
+    into subfolders). Subfolders themselves are not read, so sorted mail stays put.
+    Each message carries `parentFolderId`, used to skip mail already in its target folder.
+    """
+    refs: list[str] = list(SOURCE_WELLKNOWN)
+    try:
+        refs += list_category_folder_ids(token, parent_name)
+    except GraphAPIError:
+        pass  # parent folder may not exist yet on a first run
+
+    messages: list[dict] = []
+    seen: set[str] = set()
+    for ref in refs:
+        if len(messages) >= max_total:
+            break
+        try:
+            batch = _read_folder_messages(token, ref, max_total - len(messages))
+        except GraphAPIError:
+            continue  # a source folder may be missing/inaccessible; skip it
+        for m in batch:
+            if m["id"] not in seen:
+                seen.add(m["id"])
+                messages.append(m)
+    return messages[:max_total]
+
+
+def list_messages_in_folder(token: str, folder_id: str, top: int = 5) -> list[dict]:
+    data = _request(
+        "GET",
+        f"/me/mailFolders/{folder_id}/messages",
+        token,
+        params={"$top": str(top), "$select": MESSAGE_SELECT, "$orderby": "receivedDateTime desc"},
     )
     return data.get("value", [])
 

@@ -32,7 +32,9 @@ because there are none.
 
 Inboxes drown you. Newsletters, receipts, game deals, bank alerts, job pings — all in one endless
 list. tidemail is the tide that pulls it into order: it reads the **full content** of each email and
-files it under a durable **theme** folder, so related mail always lands together.
+files it under a durable **theme** folder — with **subfolders** for finer sorting (e.g.
+*Gaming → Steam*, *Finance → Statements*) — so related mail always lands together. A scan sweeps your
+**whole mailbox** — Inbox, Junk Email, Deleted Items, and the folders it already made.
 
 - **Local-first & private.** A small FastAPI server + a Angular web UI run on your own computer. Your
   email content is sent only to **Microsoft Graph** (to read/move your mail) and to **the AI provider

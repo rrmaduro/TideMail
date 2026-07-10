@@ -2,3 +2,4 @@
 # Install with:  pip install -r requirements-dev.txt
 -r requirements.txt
 pyinstaller>=6.6
+Pillow>=10.0            # used by scripts/make_icon.py to (re)generate the app icon

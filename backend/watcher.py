@@ -162,26 +162,34 @@ async def _file_message(
     max_folders: int,
     existing_folders: list[str],
     overflow_folder: str = OVERFLOW_FOLDER,
-) -> dict:
-    """Move an already-classified message into its theme folder and build its log entry.
+) -> Optional[dict]:
+    """File a classified message into `AI Sorted / Category [/ Subcategory]`.
 
-    Folder creation/move is isolated so one failed move never aborts the batch or scan.
+    Returns the logged activity entry, or None if the message is already in its target
+    folder (nothing to do). Isolated so one failed move never aborts the batch or scan.
     """
-    target_folder = result.folder
-    if target_folder not in existing_folders and len(existing_folders) >= max_folders:
-        target_folder = overflow_folder
-    if target_folder not in existing_folders:
-        existing_folders.append(target_folder)
+    category = result.folder
+    if category not in existing_folders and len(existing_folders) >= max_folders:
+        category = overflow_folder  # top-level category cap reached
+    if category not in existing_folders:
+        existing_folders.append(category)
+
+    subcategory = getattr(result, "subfolder", "") or ""
+    display = category + (f" / {subcategory}" if subcategory and subcategory.lower() != category.lower() else "")
 
     try:
-        folder_id = await asyncio.to_thread(graph.ensure_folder, token, parent_folder_name, target_folder)
-        await asyncio.to_thread(graph.move_message, token, message["id"], folder_id)
+        target_id = await asyncio.to_thread(
+            graph.ensure_category_path, token, parent_folder_name, category, subcategory
+        )
+        if message.get("parentFolderId") == target_id:
+            return None  # already sorted into the right folder — skip
+        await asyncio.to_thread(graph.move_message, token, message["id"], target_id)
     except Exception as exc:  # noqa: BLE001 - isolate per message
         return _error_entry(message, f"Move failed: {exc}")
 
     return {
         **_base_entry(message),
-        "folder": target_folder,
+        "folder": display,
         "urgent": result.urgent,
         "reasoning": result.reasoning,
         "raw_response": result.raw,
@@ -212,22 +220,19 @@ async def run_scan() -> dict:
             overflow_folder = cfg.get("overflow_folder_name") or OVERFLOW_FOLDER
             max_scan = cfg.get("max_scan_messages", MAX_SCAN_MESSAGES)
 
-            messages = await asyncio.to_thread(graph.list_all_inbox_messages, token, max_scan)
+            # Read across the whole mailbox: Inbox, Junk Email, Deleted Items, and the existing
+            # category folders (so already-sorted mail can be refined into subfolders).
+            messages = await asyncio.to_thread(graph.list_scan_messages, token, parent_folder_name, max_scan)
             existing_raw = await asyncio.to_thread(graph.list_ai_folders, token, parent_folder_name)
             existing_folders = [f["displayName"] for f in existing_raw]
 
-            processed = _load_processed()
-            processed_set = set(processed)
-
-            to_process = [m for m in messages if m["id"] not in processed_set]
             _state["progress"]["total"] = len(messages)
-            _state["progress"]["scanned"] = len(messages) - len(to_process)  # already-sorted count as done
             sorted_count = 0
             error_count = 0
 
-            # Classify in batches: one API call files up to BATCH_SIZE emails, so a whole inbox
-            # scan uses few requests and stays under rate limits — the key to sorting everything.
-            for batch in _chunks(to_process, classifier.BATCH_SIZE):
+            # Classify in batches: one API call files up to BATCH_SIZE emails, so a whole-mailbox
+            # scan uses few requests and stays under rate limits.
+            for batch in _chunks(messages, classifier.BATCH_SIZE):
                 _state["progress"]["current"] = f"Reading {len(batch)} emails…"
                 try:
                     results = await asyncio.to_thread(classifier.classify_batch, batch, existing_folders, cfg)
@@ -246,19 +251,17 @@ async def run_scan() -> dict:
                             token, message, result, parent_folder_name, max_folders, existing_folders, overflow_folder
                         )
 
+                    _state["progress"]["scanned"] += 1
+                    if entry is None:
+                        continue  # already in the right folder — no move, no log
                     _append_activity(entry)
                     if entry["error"]:
                         error_count += 1
                     else:
                         sorted_count += 1
-                        processed.append(message["id"])
-                        processed_set.add(message["id"])
 
-                    _state["progress"]["scanned"] += 1
                     _state["progress"]["sorted"] = sorted_count
                     _state["progress"]["errors"] = error_count
-
-                _save_processed(processed)  # persist after each batch so progress survives interruption
 
             _state["last_scan"] = datetime.now(timezone.utc).isoformat()
             _state["progress"]["current"] = None
