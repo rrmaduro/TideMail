@@ -105,6 +105,13 @@ const PROVIDER_BASE: Record<AiProvider, string> = {
           <input id="maxScan" type="range" min="10" max="2000" step="10" [ngModel]="maxScan()" (ngModelChange)="maxScan.set(+$event)" />
         </div>
       </div>
+      <label class="toggle-row">
+        <span>
+          <strong>Delete empty folders after sorting</strong>
+          <span class="hint">Tidies up categories left empty once their mail moves into subfolders.</span>
+        </span>
+        <input type="checkbox" class="switch" [ngModel]="deleteEmpty()" (ngModelChange)="deleteEmpty.set($event)" />
+      </label>
     </section>
 
     <!-- Automation -->
@@ -181,6 +188,7 @@ export class SettingsComponent implements OnInit {
   overflowFolder = signal('Misc');
   maxScan = signal(500);
   autoScan = signal(false);
+  deleteEmpty = signal(true);
   dataDir = signal('');
 
   testing = signal(false);
@@ -201,6 +209,7 @@ export class SettingsComponent implements OnInit {
       this.overflowFolder.set(c.overflow_folder_name ?? 'Misc');
       this.maxScan.set(c.max_scan_messages ?? 500);
       this.autoScan.set(c.auto_scan ?? false);
+      this.deleteEmpty.set(c.delete_empty_folders ?? true);
       this.dataDir.set(c.data_dir ?? '');
     });
   }
@@ -247,6 +256,7 @@ export class SettingsComponent implements OnInit {
       overflow_folder_name: this.overflowFolder().trim() || 'Misc',
       max_scan_messages: this.maxScan(),
       auto_scan: this.autoScan(),
+      delete_empty_folders: this.deleteEmpty(),
     };
     if (this.apiKey()) update['api_key'] = this.apiKey();
 

@@ -317,3 +317,38 @@ def delete_folder(token: str, folder_id: str) -> None:
     """Delete a folder (Graph moves it and its contents to Deleted Items — recoverable)."""
     _request("DELETE", f"/me/mailFolders/{folder_id}", token)
     _folder_cache.clear()
+
+
+def delete_empty_ai_folders(token: str, parent_name: str) -> int:
+    """Delete empty folders under the AI-Sorted parent (subfolders first, then categories).
+
+    Only removes folders with no mail and no non-empty subfolders. Never touches the
+    parent itself or anything outside it. Returns how many folders were deleted.
+    """
+    try:
+        parent_id = ensure_parent_folder(token, parent_name)
+    except GraphAPIError:
+        return 0
+
+    deleted = 0
+    for cat in _list_children(token, parent_id):
+        remaining_children = 0
+        if cat.get("childFolderCount", 0):
+            for sub in _list_children(token, cat["id"]):
+                is_empty = sub.get("totalItemCount", 0) == 0 and not sub.get("childFolderCount", 0)
+                if is_empty:
+                    try:
+                        delete_folder(token, sub["id"])
+                        deleted += 1
+                        continue
+                    except GraphAPIError:
+                        pass
+                remaining_children += 1
+
+        if cat.get("totalItemCount", 0) == 0 and remaining_children == 0:
+            try:
+                delete_folder(token, cat["id"])
+                deleted += 1
+            except GraphAPIError:
+                pass
+    return deleted

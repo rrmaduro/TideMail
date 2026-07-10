@@ -26,6 +26,7 @@ class AppConfig(BaseModel):
     max_scan_messages: int = Field(default=500, ge=10, le=5000)
     overflow_folder_name: str = "Misc"
     auto_scan: bool = False
+    delete_empty_folders: bool = True
 
 
 class Secrets(BaseModel):
@@ -45,6 +46,7 @@ class ConfigUpdate(BaseModel):
     max_scan_messages: Optional[int] = Field(default=None, ge=10, le=5000)
     overflow_folder_name: Optional[str] = None
     auto_scan: Optional[bool] = None
+    delete_empty_folders: Optional[bool] = None
     api_key: Optional[str] = None
 
 

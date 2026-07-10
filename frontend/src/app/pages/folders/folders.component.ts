@@ -28,11 +28,22 @@ type SortKey = 'count' | 'name' | 'recent';
         <h1>Your themed folders</h1>
         <p class="sub">{{ folders().length }} folder{{ folders().length === 1 ? '' : 's' }} under “{{ parent() }}” · {{ totalEmails() }} emails sorted</p>
       </div>
-      <button class="btn btn-ghost" (click)="reload()" [disabled]="loading()">
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Refresh
-      </button>
+      <div class="head-actions">
+        <button class="btn btn-ghost" (click)="cleanup()" [disabled]="loading() || cleaning()">
+          @if (cleaning()) {
+            <span class="spinner spinner--dark" aria-hidden="true"></span> Cleaning…
+          } @else {
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Clean up empty
+          }
+        </button>
+        <button class="btn btn-ghost" (click)="reload()" [disabled]="loading()">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Refresh
+        </button>
+      </div>
     </header>
+    @if (cleanupMsg()) { <div class="cleanup-note" role="status">{{ cleanupMsg() }}</div> }
 
     <!-- distribution bar -->
     @if (folders().length > 0) {
@@ -180,6 +191,8 @@ export class FoldersComponent implements OnInit {
   renaming = signal(false);
   renameValue = signal('');
   busy = signal(false);
+  cleaning = signal(false);
+  cleanupMsg = signal<string | null>(null);
   actionError = signal<string | null>(null);
 
   totalEmails = computed(() => this.folders().reduce((n, f) => n + f.count, 0));
@@ -229,6 +242,24 @@ export class FoldersComponent implements OnInit {
 
   dot(name: string): string {
     return folderColor(name).dot;
+  }
+
+  cleanup(): void {
+    this.cleaning.set(true);
+    this.cleanupMsg.set(null);
+    this.api.cleanupFolders().subscribe({
+      next: (r) => {
+        this.cleaning.set(false);
+        this.cleanupMsg.set(
+          r.deleted > 0 ? `Removed ${r.deleted} empty folder${r.deleted === 1 ? '' : 's'}.` : 'No empty folders to remove.',
+        );
+        if (r.deleted > 0) this.reload();
+      },
+      error: (err) => {
+        this.cleaning.set(false);
+        this.cleanupMsg.set(err?.error?.detail || 'Cleanup failed.');
+      },
+    });
   }
 
   select(f: FolderInfo): void {

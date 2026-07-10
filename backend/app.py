@@ -228,6 +228,17 @@ def delete_folder(folder_id: str):
     return {"ok": True}
 
 
+@api.post("/folders/cleanup")
+def cleanup_empty_folders():
+    token = _folder_token()
+    cfg = config_module.load_config()
+    try:
+        deleted = graph.delete_empty_ai_folders(token, cfg.parent_folder_name)
+    except graph.GraphAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"deleted": deleted}
+
+
 # ---------- config ----------
 
 

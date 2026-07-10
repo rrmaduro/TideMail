@@ -15,6 +15,33 @@ h1 {
   color: var(--text-muted);
   font-size: 14px;
 }
+.head-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.cleanup-note {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(26, 26, 46, 0.25);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 /* distribution bar */
 .dist {

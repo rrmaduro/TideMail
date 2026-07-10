@@ -302,9 +302,23 @@ async def run_scan() -> dict:
 
             # Persist this scan's moves so the user can undo them in one click.
             _write_json(MOVES_PATH, moves)
+
+            # Tidy up: remove folders left empty by this sort.
+            deleted_folders = 0
+            if cfg.get("delete_empty_folders", True):
+                _state["progress"]["current"] = "Cleaning up empty folders…"
+                deleted_folders = await asyncio.to_thread(
+                    graph.delete_empty_ai_folders, token, parent_folder_name
+                )
+
             _state["last_scan"] = datetime.now(timezone.utc).isoformat()
             _state["progress"]["current"] = None
-            return {"scanned": len(messages), "sorted": sorted_count, "errors": error_count}
+            return {
+                "scanned": len(messages),
+                "sorted": sorted_count,
+                "errors": error_count,
+                "deleted_folders": deleted_folders,
+            }
         except Exception as exc:  # noqa: BLE001 - surface scan-level failures (auth/network) to the UI
             _state["last_error"] = str(exc)
             raise

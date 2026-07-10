@@ -90,6 +90,9 @@ export class ApiService {
   deleteFolder(folderId: string): Observable<{ ok: boolean }> {
     return this.http.delete<{ ok: boolean }>(`${this.base}/folders/${encodeURIComponent(folderId)}`);
   }
+  cleanupFolders(): Observable<{ deleted: number }> {
+    return this.http.post<{ deleted: number }>(`${this.base}/folders/cleanup`, {});
+  }
 
   // --- config ---
   getConfig(): Observable<AppConfig> {
