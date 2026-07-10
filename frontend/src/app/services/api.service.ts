@@ -41,6 +41,12 @@ export class ApiService {
       {},
     );
   }
+  undoAvailable(): Observable<{ available: number }> {
+    return this.http.get<{ available: number }>(`${this.base}/undo`);
+  }
+  undoLastScan(): Observable<{ undone: number; failed: number; available: number }> {
+    return this.http.post<{ undone: number; failed: number; available: number }>(`${this.base}/undo`, {});
+  }
 
   // --- activity ---
   getActivity(params: {

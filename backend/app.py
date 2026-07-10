@@ -98,6 +98,21 @@ async def run_scan():
     return {**result, **watcher.get_status()}
 
 
+@api.get("/undo")
+def undo_available():
+    return {"available": watcher.undo_available()}
+
+
+@api.post("/undo")
+def undo_last_scan():
+    token = _folder_token()
+    try:
+        result = watcher.undo_last_scan(token)
+    except graph.GraphAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {**result, "available": watcher.undo_available()}
+
+
 # ---------- activity ----------
 
 
@@ -290,7 +305,7 @@ def test_ai(body: TestAIRequest = TestAIRequest()):
 @api.post("/reset")
 def reset_all_data():
     auth.disconnect()
-    for path in (watcher.PROCESSED_PATH, watcher.ACTIVITY_PATH, config_module.CONFIG_PATH, config_module.SECRETS_PATH):
+    for path in (watcher.PROCESSED_PATH, watcher.ACTIVITY_PATH, watcher.MOVES_PATH, config_module.CONFIG_PATH, config_module.SECRETS_PATH):
         if path.exists():
             path.unlink()
     return {"ok": True}

@@ -17,6 +17,7 @@ from paths import DATA_DIR
 
 PROCESSED_PATH = DATA_DIR / "processed.json"
 ACTIVITY_PATH = DATA_DIR / "activity.json"
+MOVES_PATH = DATA_DIR / "last_moves.json"  # moves from the most recent scan, for one-click undo
 
 PROCESSED_CAP = 5000
 ACTIVITY_CAP = 2000
@@ -133,6 +134,30 @@ def clear_activity() -> None:
     _write_json(ACTIVITY_PATH, [])
 
 
+def undo_available() -> int:
+    """How many moves from the last scan can be undone."""
+    return len(_read_json(MOVES_PATH, []))
+
+
+def undo_last_scan(token: str) -> dict:
+    """Move every email from the last scan back to the folder it came from."""
+    moves = _read_json(MOVES_PATH, [])
+    undone = 0
+    failed = 0
+    for mv in moves:
+        dest = mv.get("from_folder_id")
+        if not dest:
+            failed += 1
+            continue
+        try:
+            graph.move_message(token, mv["id"], dest)
+            undone += 1
+        except Exception:  # noqa: BLE001 - a message may have moved/been deleted since; skip it
+            failed += 1
+    _write_json(MOVES_PATH, [])  # consumed — nothing left to undo
+    return {"undone": undone, "failed": failed}
+
+
 def _base_entry(message: dict) -> dict:
     sender = message.get("from", {}).get("emailAddress", {})
     return {
@@ -177,11 +202,12 @@ async def _file_message(
     subcategory = getattr(result, "subfolder", "") or ""
     display = category + (f" / {subcategory}" if subcategory and subcategory.lower() != category.lower() else "")
 
+    source_id = message.get("parentFolderId")
     try:
         target_id = await asyncio.to_thread(
             graph.ensure_category_path, token, parent_folder_name, category, subcategory
         )
-        if message.get("parentFolderId") == target_id:
+        if source_id == target_id:
             return None  # already sorted into the right folder — skip
         await asyncio.to_thread(graph.move_message, token, message["id"], target_id)
     except Exception as exc:  # noqa: BLE001 - isolate per message
@@ -194,6 +220,8 @@ async def _file_message(
         "reasoning": result.reasoning,
         "raw_response": result.raw,
         "error": False,
+        "from_folder_id": source_id,   # for undo (not shown in the UI)
+        "to_folder_id": target_id,
     }
 
 
@@ -229,6 +257,7 @@ async def run_scan() -> dict:
             _state["progress"]["total"] = len(messages)
             sorted_count = 0
             error_count = 0
+            moves: list[dict] = []  # for one-click undo of this scan
 
             # Classify in batches: one API call files up to BATCH_SIZE emails, so a whole-mailbox
             # scan uses few requests and stays under rate limits.
@@ -259,10 +288,20 @@ async def run_scan() -> dict:
                         error_count += 1
                     else:
                         sorted_count += 1
+                        if entry.get("to_folder_id"):
+                            moves.append({
+                                "id": entry["id"],
+                                "from_folder_id": entry.get("from_folder_id"),
+                                "to_folder_id": entry["to_folder_id"],
+                                "subject": entry["subject"],
+                                "folder": entry["folder"],
+                            })
 
                     _state["progress"]["sorted"] = sorted_count
                     _state["progress"]["errors"] = error_count
 
+            # Persist this scan's moves so the user can undo them in one click.
+            _write_json(MOVES_PATH, moves)
             _state["last_scan"] = datetime.now(timezone.utc).isoformat()
             _state["progress"]["current"] = None
             return {"scanned": len(messages), "sorted": sorted_count, "errors": error_count}

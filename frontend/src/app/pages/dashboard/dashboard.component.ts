@@ -34,14 +34,26 @@ import { RevealDirective } from '../../directives/reveal.directive';
           @if (lastScan()) { <span class="last-scan">· Last sorted {{ lastScan() }}</span> }
         </p>
       </div>
-      <button class="btn btn-accent scan-btn" (click)="scan()" [disabled]="scanning()">
-        @if (scanning()) {
-          <span class="spinner" aria-hidden="true"></span> Sorting…
-        } @else {
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          Sort entire inbox
+      <div class="head-actions">
+        @if (undoCount() > 0 && !scanning()) {
+          <button class="btn btn-ghost" (click)="undo()" [disabled]="undoing()">
+            @if (undoing()) {
+              <span class="spinner spinner--dark" aria-hidden="true"></span> Undoing…
+            } @else {
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Undo last sort ({{ undoCount() }})
+            }
+          </button>
         }
-      </button>
+        <button class="btn btn-accent scan-btn" (click)="scan()" [disabled]="scanning()">
+          @if (scanning()) {
+            <span class="spinner" aria-hidden="true"></span> Sorting…
+          } @else {
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Sort entire inbox
+          }
+        </button>
+      </div>
     </header>
 
     @if (poller.connectionError()) {
@@ -137,6 +149,12 @@ import { RevealDirective } from '../../directives/reveal.directive';
       }
       .last-scan {
         color: var(--text-subtle);
+      }
+      .head-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        flex-wrap: wrap;
       }
       .scan-btn {
         min-height: 46px;
@@ -329,6 +347,8 @@ export class DashboardComponent implements OnInit {
 
   actionError = signal<string | null>(null);
   foldersLoading = signal(true);
+  undoCount = signal(0);
+  undoing = signal(false);
   private folderCount = signal(0);
 
   pct = computed(() => {
@@ -358,6 +378,7 @@ export class DashboardComponent implements OnInit {
   ngOnInit(): void {
     this.poller.refreshNow();
     this.loadFolderCount();
+    this.loadUndo();
   }
 
   private loadFolderCount(): void {
@@ -370,6 +391,10 @@ export class DashboardComponent implements OnInit {
     });
   }
 
+  private loadUndo(): void {
+    this.api.undoAvailable().subscribe({ next: (r) => this.undoCount.set(r.available), error: () => {} });
+  }
+
   scan(): void {
     this.actionError.set(null);
     // Optimistically flip to scanning so the UI reacts instantly; the poller confirms.
@@ -378,10 +403,29 @@ export class DashboardComponent implements OnInit {
       next: () => {
         this.poller.refreshNow();
         this.loadFolderCount();
+        this.loadUndo();
       },
       error: (err) => {
         this.actionError.set(err?.error?.detail || 'Scan failed. Check your connection and AI settings.');
         this.poller.refreshNow();
+      },
+    });
+  }
+
+  undo(): void {
+    if (!confirm(`Move ${this.undoCount()} email(s) back to where they were before the last sort?`)) return;
+    this.undoing.set(true);
+    this.actionError.set(null);
+    this.api.undoLastScan().subscribe({
+      next: (r) => {
+        this.undoCount.set(r.available);
+        this.undoing.set(false);
+        this.poller.refreshNow();
+        this.loadFolderCount();
+      },
+      error: (err) => {
+        this.actionError.set(err?.error?.detail || 'Undo failed.');
+        this.undoing.set(false);
       },
     });
   }
