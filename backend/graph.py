@@ -11,8 +11,8 @@ import httpx
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 MESSAGE_SELECT = "id,subject,from,receivedDateTime,bodyPreview,body,parentFolderId"
 
-# Well-known Outlook folders scanned as "unsorted" sources, alongside the inbox.
-SOURCE_WELLKNOWN = ["inbox", "junkemail", "deleteditems"]
+# Well-known folders never scanned: they don't hold received mail worth sorting.
+EXCLUDE_WELLKNOWN = ["sentitems", "drafts", "outbox"]
 
 # In-memory folder name -> id cache, keyed by (parent_name, folder_name). Rebuilt lazily
 # from Graph on first use each process run; not worth persisting to disk.
@@ -212,27 +212,74 @@ def _read_folder_messages(token: str, ref: str, remaining: int, page_size: int =
     return messages[:remaining]
 
 
-def list_scan_messages(token: str, parent_name: str, max_total: int = 500) -> list[dict]:
-    """Read messages to sort from across the mailbox: Inbox, Junk Email, Deleted Items,
-    and the top-level AI-Sorted category folders (so already-sorted mail can be refined
-    into subfolders). Subfolders themselves are not read, so sorted mail stays put.
-    Each message carries `parentFolderId`, used to skip mail already in its target folder.
-    """
-    refs: list[str] = list(SOURCE_WELLKNOWN)
+def _walk_all_folders(token: str) -> list[dict]:
+    """Every mail folder in the mailbox (recursively), each as {id, displayName, parentFolderId}."""
+    folders: list[dict] = []
+    top = _request(
+        "GET", "/me/mailFolders", token,
+        params={"$top": "100", "$select": "id,displayName,parentFolderId,childFolderCount"},
+    ).get("value", [])
+    queue = list(top)
+    while queue:
+        f = queue.pop()
+        folders.append(f)
+        if f.get("childFolderCount", 0):
+            try:
+                children = _list_children(token, f["id"])
+            except GraphAPIError:
+                children = []
+            queue.extend(children)
+    return folders
+
+
+def _wellknown_id(token: str, name: str) -> Optional[str]:
     try:
-        refs += list_category_folder_ids(token, parent_name)
+        return _request("GET", f"/me/mailFolders/{name}", token, params={"$select": "id"}).get("id")
     except GraphAPIError:
-        pass  # parent folder may not exist yet on a first run
+        return None
+
+
+def list_scan_messages(token: str, parent_name: str, max_total: int = 500) -> list[dict]:
+    """Read messages to sort from EVERY folder in the mailbox, except:
+      - Sent Items / Drafts / Outbox (not received mail), and
+      - the AI-Sorted sub-subfolders (already fully sorted — avoids needless re-work).
+    Top-level AI-Sorted category folders ARE read, so their mail can be refined into
+    subfolders. Each message carries `parentFolderId`, used to skip mail already in place.
+    """
+    all_folders = _walk_all_folders(token)
+
+    excluded: set[str] = set()
+    for wk in EXCLUDE_WELLKNOWN:
+        fid = _wellknown_id(token, wk)
+        if fid:
+            excluded.add(fid)
+
+    # Exclude the AI-Sorted subfolders (grandchildren of the parent), which are "done".
+    try:
+        parent_id = ensure_parent_folder(token, parent_name)
+        category_ids = {f["id"] for f in _list_children(token, parent_id)}
+        for f in all_folders:
+            if f.get("parentFolderId") in category_ids:
+                excluded.add(f["id"])
+    except GraphAPIError:
+        pass
+
+    # Scan the "incoming" folders first so they're covered before the message cap is hit.
+    priority = [pid for pid in (_wellknown_id(token, n) for n in ("inbox", "junkemail", "deleteditems")) if pid]
+    priority_rank = {pid: i for i, pid in enumerate(priority)}
+    all_folders.sort(key=lambda f: priority_rank.get(f["id"], len(priority) + 1))
 
     messages: list[dict] = []
     seen: set[str] = set()
-    for ref in refs:
+    for f in all_folders:
         if len(messages) >= max_total:
             break
+        if f["id"] in excluded:
+            continue
         try:
-            batch = _read_folder_messages(token, ref, max_total - len(messages))
+            batch = _read_folder_messages(token, f["id"], max_total - len(messages))
         except GraphAPIError:
-            continue  # a source folder may be missing/inaccessible; skip it
+            continue  # a folder may be inaccessible; skip it
         for m in batch:
             if m["id"] not in seen:
                 seen.add(m["id"])
