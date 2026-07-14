@@ -86,10 +86,18 @@ export interface FolderLastMessage {
   sender_name: string;
 }
 
+export interface Subfolder {
+  id: string;
+  name: string;
+  count: number;
+}
+
 export interface FolderInfo {
   id: string;
   name: string;
   count: number;
+  direct_count?: number;
+  subfolders?: Subfolder[];
   last_message: FolderLastMessage | null;
 }
 

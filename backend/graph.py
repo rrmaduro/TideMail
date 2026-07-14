@@ -297,14 +297,23 @@ def list_messages_in_folder(token: str, folder_id: str, top: int = 5) -> list[di
     return data.get("value", [])
 
 
-def list_messages_in_folder(token: str, folder_id: str, top: int = 5) -> list[dict]:
-    data = _request(
-        "GET",
-        f"/me/mailFolders/{folder_id}/messages",
-        token,
-        params={"$top": str(top), "$select": MESSAGE_SELECT, "$orderby": "receivedDateTime desc"},
-    )
-    return data.get("value", [])
+def folder_children(token: str, folder_id: str) -> list[dict]:
+    """Direct child folders of a folder (id, displayName, totalItemCount, childFolderCount)."""
+    return _list_children(token, folder_id)
+
+
+def list_messages_recursive(token: str, folder_id: str, top: int = 15) -> list[dict]:
+    """Newest messages from a folder AND its subfolders, so the emails 'under' a themed
+    folder are all accounted for when you open it."""
+    messages = list_messages_in_folder(token, folder_id, top)
+    try:
+        for child in _list_children(token, folder_id):
+            if child.get("totalItemCount", 0):
+                messages.extend(list_messages_in_folder(token, child["id"], top))
+    except GraphAPIError:
+        pass
+    messages.sort(key=lambda m: m.get("receivedDateTime", ""), reverse=True)
+    return messages[:top]
 
 
 def rename_folder(token: str, folder_id: str, new_name: str) -> dict:
@@ -320,10 +329,12 @@ def delete_folder(token: str, folder_id: str) -> None:
 
 
 def delete_empty_ai_folders(token: str, parent_name: str) -> int:
-    """Delete empty folders under the AI-Sorted parent (subfolders first, then categories).
+    """Delete empty *leaf* folders under the AI-Sorted parent.
 
-    Only removes folders with no mail and no non-empty subfolders. Never touches the
-    parent itself or anything outside it. Returns how many folders were deleted.
+    Only a folder with NO child folders (no "sons") and no mail is removed — a parent
+    folder is never deleted, even if its own direct count is 0 (its mail lives in its
+    subfolders). Never touches the parent itself or anything outside it. Returns the
+    number of folders deleted.
     """
     try:
         parent_id = ensure_parent_folder(token, parent_name)
@@ -332,20 +343,17 @@ def delete_empty_ai_folders(token: str, parent_name: str) -> int:
 
     deleted = 0
     for cat in _list_children(token, parent_id):
-        remaining_children = 0
         if cat.get("childFolderCount", 0):
+            # Category has subfolders (sons) → keep it; only prune its empty leaf subfolders.
             for sub in _list_children(token, cat["id"]):
-                is_empty = sub.get("totalItemCount", 0) == 0 and not sub.get("childFolderCount", 0)
-                if is_empty:
+                if sub.get("childFolderCount", 0) == 0 and sub.get("totalItemCount", 0) == 0:
                     try:
                         delete_folder(token, sub["id"])
                         deleted += 1
-                        continue
                     except GraphAPIError:
                         pass
-                remaining_children += 1
-
-        if cat.get("totalItemCount", 0) == 0 and remaining_children == 0:
+        elif cat.get("totalItemCount", 0) == 0:
+            # Childless empty category → safe to delete.
             try:
                 delete_folder(token, cat["id"])
                 deleted += 1

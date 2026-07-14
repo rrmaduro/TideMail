@@ -149,6 +149,17 @@ type SortKey = 'count' | 'name' | 'recent';
 
           <div class="panel-meta">{{ sel.count }} email{{ sel.count === 1 ? '' : 's' }}</div>
 
+          @if (sel.subfolders?.length) {
+            <div class="subfolders">
+              <span class="subfolders-label">Subfolders</span>
+              <div class="subfolder-chips">
+                @for (s of sel.subfolders; track s.id) {
+                  <span class="subchip"><span class="subdot" [style.background]="dot(s.name)"></span>{{ s.name }} <b>{{ s.count }}</b></span>
+                }
+              </div>
+            </div>
+          }
+
           @if (panelLoading()) {
             <div class="skeleton sk-line"></div><div class="skeleton sk-line"></div><div class="skeleton sk-line"></div>
           } @else if (panelEmails().length === 0) {

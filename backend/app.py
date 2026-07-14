@@ -157,13 +157,24 @@ def get_folders():
         raw_folders = graph.list_ai_folders(token, cfg["parent_folder_name"])
         folders = []
         for f in raw_folders:
-            last_messages = graph.list_messages_in_folder(token, f["id"], top=1)
+            # Count mail in the category AND its subfolders, so a category whose mail sits
+            # in subfolders isn't shown as empty.
+            subfolders = graph.folder_children(token, f["id"]) if f.get("childFolderCount", 0) else []
+            direct = f.get("totalItemCount", 0)
+            total = direct + sum(s.get("totalItemCount", 0) for s in subfolders)
+
+            last_messages = graph.list_messages_recursive(token, f["id"], top=1)
             last_message = last_messages[0] if last_messages else None
             folders.append(
                 {
                     "id": f["id"],
                     "name": f["displayName"],
-                    "count": f.get("totalItemCount", 0),
+                    "count": total,
+                    "direct_count": direct,
+                    "subfolders": [
+                        {"id": s["id"], "name": s["displayName"], "count": s.get("totalItemCount", 0)}
+                        for s in subfolders
+                    ],
                     "last_message": {
                         "subject": last_message.get("subject", ""),
                         "received": last_message.get("receivedDateTime"),
@@ -187,7 +198,7 @@ def get_folder_emails(folder_id: str, top: int = Query(default=5, ge=1, le=50)):
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     try:
-        messages = graph.list_messages_in_folder(token, folder_id, top=top)
+        messages = graph.list_messages_recursive(token, folder_id, top=top)
     except graph.GraphAPIError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"messages": messages}
