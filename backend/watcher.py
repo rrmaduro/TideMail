@@ -13,6 +13,7 @@ import auth
 import classifier
 import config as config_module
 import graph
+import rules as rules_module
 from paths import DATA_DIR
 
 PROCESSED_PATH = DATA_DIR / "processed.json"
@@ -259,9 +260,55 @@ async def run_scan() -> dict:
             error_count = 0
             moves: list[dict] = []  # for one-click undo of this scan
 
-            # Classify in batches: one API call files up to BATCH_SIZE emails, so a whole-mailbox
-            # scan uses few requests and stays under rate limits.
-            for batch in _chunks(messages, classifier.BATCH_SIZE):
+            def _record(entry: Optional[dict]) -> None:
+                """Log a filed message and remember its move so it can be undone."""
+                nonlocal sorted_count, error_count
+                if entry is None:
+                    return
+                _append_activity(entry)
+                if entry["error"]:
+                    error_count += 1
+                else:
+                    sorted_count += 1
+                    if entry.get("to_folder_id"):
+                        moves.append({
+                            "id": entry["id"],
+                            "from_folder_id": entry.get("from_folder_id"),
+                            "to_folder_id": entry["to_folder_id"],
+                            "subject": entry["subject"],
+                            "folder": entry["folder"],
+                        })
+                _state["progress"]["sorted"] = sorted_count
+                _state["progress"]["errors"] = error_count
+
+            # Your rules win over the AI: "never touch" mail is left alone, and pinned
+            # senders/domains are filed directly — no model call, so they cost nothing.
+            rules_doc = rules_module.load()
+            to_classify: list[dict] = []
+            for message in messages:
+                if rules_module.is_never(message, rules_doc):
+                    _state["progress"]["scanned"] += 1
+                    continue
+                pin = rules_module.match(message, rules_doc)
+                if pin:
+                    _state["progress"]["current"] = message.get("subject", "(no subject)")
+                    result = classifier.ClassificationResult(
+                        folder=pin.folder,
+                        subfolder=pin.subfolder,
+                        urgent=False,
+                        reasoning=f"Matched your rule: {pin.type} “{pin.value}”",
+                        raw="",
+                    )
+                    _record(await _file_message(
+                        token, message, result, parent_folder_name, max_folders, existing_folders, overflow_folder
+                    ))
+                    _state["progress"]["scanned"] += 1
+                else:
+                    to_classify.append(message)
+
+            # Classify the rest in batches: one API call files up to BATCH_SIZE emails, so a
+            # whole-mailbox scan uses few requests and stays under rate limits.
+            for batch in _chunks(to_classify, classifier.BATCH_SIZE):
                 _state["progress"]["current"] = f"Reading {len(batch)} emails…"
                 try:
                     results = await asyncio.to_thread(classifier.classify_batch, batch, existing_folders, cfg)
@@ -281,24 +328,7 @@ async def run_scan() -> dict:
                         )
 
                     _state["progress"]["scanned"] += 1
-                    if entry is None:
-                        continue  # already in the right folder — no move, no log
-                    _append_activity(entry)
-                    if entry["error"]:
-                        error_count += 1
-                    else:
-                        sorted_count += 1
-                        if entry.get("to_folder_id"):
-                            moves.append({
-                                "id": entry["id"],
-                                "from_folder_id": entry.get("from_folder_id"),
-                                "to_folder_id": entry["to_folder_id"],
-                                "subject": entry["subject"],
-                                "folder": entry["folder"],
-                            })
-
-                    _state["progress"]["sorted"] = sorted_count
-                    _state["progress"]["errors"] = error_count
+                    _record(entry)  # None = already in the right folder, nothing to do
 
             # Persist this scan's moves so the user can undo them in one click.
             _write_json(MOVES_PATH, moves)

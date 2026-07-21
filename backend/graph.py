@@ -328,35 +328,50 @@ def delete_folder(token: str, folder_id: str) -> None:
     _folder_cache.clear()
 
 
-def delete_empty_ai_folders(token: str, parent_name: str) -> int:
-    """Delete empty *leaf* folders under the AI-Sorted parent.
+_MAX_CLEANUP_PASSES = 6
 
-    Only a folder with NO child folders (no "sons") and no mail is removed — a parent
-    folder is never deleted, even if its own direct count is 0 (its mail lives in its
-    subfolders). Never touches the parent itself or anything outside it. Returns the
-    number of folders deleted.
+
+def _prune_empty_leaves(token: str, folder_id: str) -> int:
+    """One pass over a subtree: delete every empty folder that has no child folders.
+
+    A folder with sons is never deleted — we recurse into it instead. Its mail may live
+    in those sons.
+    """
+    deleted = 0
+    try:
+        children = _list_children(token, folder_id)
+    except GraphAPIError:
+        return 0
+
+    for child in children:
+        if child.get("childFolderCount", 0):
+            deleted += _prune_empty_leaves(token, child["id"])
+        elif child.get("totalItemCount", 0) == 0:
+            try:
+                delete_folder(token, child["id"])
+                deleted += 1
+            except GraphAPIError:
+                pass
+    return deleted
+
+
+def delete_empty_ai_folders(token: str, parent_name: str) -> int:
+    """Delete every empty folder under the AI-Sorted parent.
+
+    Each pass removes only childless empty folders, so a parent is never deleted while it
+    still has sons. Passes repeat until nothing more can be removed, which collapses a
+    fully-empty tree entirely (empty leaves go, then their now-childless empty parent).
+    The parent itself is never deleted, nor is anything outside it.
     """
     try:
         parent_id = ensure_parent_folder(token, parent_name)
     except GraphAPIError:
         return 0
 
-    deleted = 0
-    for cat in _list_children(token, parent_id):
-        if cat.get("childFolderCount", 0):
-            # Category has subfolders (sons) → keep it; only prune its empty leaf subfolders.
-            for sub in _list_children(token, cat["id"]):
-                if sub.get("childFolderCount", 0) == 0 and sub.get("totalItemCount", 0) == 0:
-                    try:
-                        delete_folder(token, sub["id"])
-                        deleted += 1
-                    except GraphAPIError:
-                        pass
-        elif cat.get("totalItemCount", 0) == 0:
-            # Childless empty category → safe to delete.
-            try:
-                delete_folder(token, cat["id"])
-                deleted += 1
-            except GraphAPIError:
-                pass
-    return deleted
+    total = 0
+    for _ in range(_MAX_CLEANUP_PASSES):
+        removed = _prune_empty_leaves(token, parent_id)
+        total += removed
+        if removed == 0:
+            break  # nothing empty left
+    return total

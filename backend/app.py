@@ -16,6 +16,7 @@ import auth
 import classifier
 import config as config_module
 import graph
+import rules as rules_module
 import watcher
 from paths import DATA_DIR, FRONTEND_DIST
 
@@ -239,6 +240,16 @@ def delete_folder(folder_id: str):
     return {"ok": True}
 
 
+@api.get("/rules")
+def get_rules():
+    return rules_module.load().model_dump()
+
+
+@api.post("/rules")
+def save_rules(doc: rules_module.RulesDoc):
+    return rules_module.save(doc).model_dump()
+
+
 @api.post("/folders/cleanup")
 def cleanup_empty_folders():
     token = _folder_token()
@@ -327,7 +338,8 @@ def test_ai(body: TestAIRequest = TestAIRequest()):
 @api.post("/reset")
 def reset_all_data():
     auth.disconnect()
-    for path in (watcher.PROCESSED_PATH, watcher.ACTIVITY_PATH, watcher.MOVES_PATH, config_module.CONFIG_PATH, config_module.SECRETS_PATH):
+    for path in (watcher.PROCESSED_PATH, watcher.ACTIVITY_PATH, watcher.MOVES_PATH, rules_module.RULES_PATH,
+                 config_module.CONFIG_PATH, config_module.SECRETS_PATH):
         if path.exists():
             path.unlink()
     return {"ok": True}
