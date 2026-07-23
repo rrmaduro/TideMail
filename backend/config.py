@@ -21,7 +21,7 @@ class AppConfig(BaseModel):
     base_url: str = ""
     model: str = ""
     check_interval_minutes: int = Field(default=5, ge=1, le=60)
-    max_folder_count: int = Field(default=10, ge=1, le=50)
+    max_folder_count: int = Field(default=25, ge=1, le=50)
     parent_folder_name: str = "AI Sorted"
     max_scan_messages: int = Field(default=500, ge=10, le=5000)
     overflow_folder_name: str = "Misc"

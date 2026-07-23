@@ -27,51 +27,57 @@ PROVIDER_PRESETS = {
     "custom": {"label": "Custom", "base_url": ""},
 }
 
+# The classification rules shared by the single and batch prompts. The app can only FILE an
+# email into a folder and set an urgent flag, so the executive-assistant spec is mapped onto
+# those two levers: the Category becomes the folder, and Priority-1/Security/flag-worthy mail
+# sets urgent=true. Spam and low-confidence mail go to their own folders.
+_CLASSIFY_RULES = (
+    "You are an expert executive assistant organizing an email inbox. Read the FULL email "
+    "(sender, subject, body) carefully and decide where it belongs, applying these rules.\n\n"
+    "GENERAL:\n"
+    "- Read the whole email and detect its REAL intent — don't rely on keywords alone.\n"
+    "- Ignore signatures, unsubscribe links, tracking pixels and legal disclaimers when judging.\n"
+    "- Use thread context and judge by the newest message. Favor caution over aggressive sorting.\n\n"
+    "CATEGORY = the folder. Choose EXACTLY ONE of these categories:\n"
+    "  Work, Personal, Finance, Bills, Shopping, Travel, Health, Education, Government, Legal,\n"
+    "  Security, Subscriptions, Marketing, Social, Receipts, Newsletters, Projects, Reference,\n"
+    "  Spam, Needs Review.\n"
+    "- If an email spans several topics, use the category of its HIGHEST-priority item.\n"
+    "- Mark obvious phishing, scams, fake invoices, crypto scams, fake giveaways, unsolicited\n"
+    "  investment offers and suspicious-login junk as \"Spam\".\n"
+    "- If you are LESS THAN 70% confident, or nothing fits well, use \"Needs Review\".\n"
+    "- Prefer reusing an already-existing folder when it fits, so related mail lands together.\n"
+    "  Existing folders: {folders_list}\n"
+    "- Optionally add a more specific SUBFOLDER within the category for finer sorting when one\n"
+    "  clearly applies (e.g. Travel -> \"Flights\", Receipts -> \"Amazon\", Finance -> \"Statements\",\n"
+    "  Newsletters -> \"AI\"). Use \"\" when nothing specific fits. Reuse subfolder names consistently.\n\n"
+    "URGENT = an attention flag. Set urgent=true when the email needs prompt personal action:\n"
+    "- SECURITY is always urgent: password resets, MFA codes, login/sign-in alerts, unusual\n"
+    "  sign-ins, security warnings, account verification.\n"
+    "- PRIORITY-1 matters: hard deadlines, payment failures, clients waiting, legal matters,\n"
+    "  family emergencies, important work requests.\n"
+    "- FLAG-WORTHY, time-sensitive items: invoices or contracts needing a response, appointments,\n"
+    "  meetings and calendar invites (Zoom/Teams/Google Meet), interview requests, travel\n"
+    "  bookings/boarding passes, tax documents, and payment problems.\n"
+    "- If the email says today, tomorrow, ASAP, deadline or urgent, treat it as MORE time-sensitive.\n"
+    "- Routine marketing, promotions, sales, social notifications, receipts and read newsletters\n"
+    "  are NOT urgent.\n\n"
+    "Detect the email's language automatically and always write the reasoning in English."
+)
+
 SYSTEM_PROMPT_TEMPLATE = (
-    "You are an email triage assistant that reads the FULL content of an email and files it "
-    "into one clean, broad thematic folder — organizing an inbox theme by theme.\n\n"
-    "Rules:\n"
-    "- Choose ONE broad, durable theme that captures what the email is fundamentally about. "
-    "Think top-level life/work categories, e.g.: Gaming, Finance, Shopping, Travel, Work, "
-    "Social, Newsletters, Health, Education, Entertainment, Personal, Bills & Receipts, "
-    "Job Search, Security & Accounts. Pick whatever fits best — these are just examples.\n"
-    "- Keep folder names short, general, and reusable (1-2 words, Title Case). Prefer a broad "
-    "theme like \"Gaming\" over a narrow one like \"Steam Summer Sale\".\n"
-    "- STRONGLY prefer reusing one of the existing folders when the email reasonably fits it, "
-    "so related mail lands together. Existing folders: {folders_list}\n"
-    "- Only create a new folder when none of the existing ones fit, and only while fewer than "
-    "{max_folders} folders exist (there are currently {folder_count}).\n"
-    "- Also give a MORE SPECIFIC subfolder within that theme for finer sorting, when one clearly "
-    "applies (e.g. Gaming -> \"Steam\", Finance -> \"Statements\", Shopping -> \"Orders\", "
-    "Travel -> \"Flights\"). Leave subfolder empty (\"\") if nothing specific fits.\n"
-    "- Judge the full message (sender, subject, and body) — not just the subject line.\n"
-    "- Flag urgent=true only for genuinely time-sensitive items needing prompt personal action "
-    "(security alerts, deadlines, outages, payment failures), not routine promotions.\n\n"
-    'Respond with ONLY a JSON object, no markdown fencing, in this exact shape: '
-    '{{"folder": "Broad Theme", "subfolder": "Specific or empty", "urgent": true|false, "reasoning": "one short sentence"}}'
+    _CLASSIFY_RULES + "\n\n"
+    "Respond with ONLY a JSON object, no markdown fencing, in this exact shape:\n"
+    '{{"folder": "Category", "subfolder": "Specific or empty", "urgent": true|false, "reasoning": "one short sentence"}}'
 )
 
 BATCH_SYSTEM_PROMPT_TEMPLATE = (
-    "You are an email triage assistant that reads a NUMBERED LIST of emails and files EACH one "
-    "into a single clean, broad thematic folder — organizing an inbox theme by theme.\n\n"
-    "Rules:\n"
-    "- For every email, choose ONE broad, durable theme (top-level life/work categories), e.g.: "
-    "Gaming, Finance, Shopping, Travel, Work, Social, Newsletters, Health, Education, "
-    "Entertainment, Personal, Bills & Receipts, Job Search, Security & Accounts.\n"
-    "- Keep folder names short, general, reusable (1-2 words, Title Case). Prefer broad "
-    "(\"Gaming\") over narrow (\"Steam Summer Sale\").\n"
-    "- BE CONSISTENT: if several emails share a theme, give them the EXACT SAME folder name. "
-    "Strongly prefer reusing these existing folders when they fit: {folders_list}\n"
-    "- Across the whole list, do not invent more than {max_folders} distinct folders total "
-    "(there are currently {folder_count} existing).\n"
-    "- Also give a specific SUBFOLDER within the theme for finer sorting when one clearly applies "
-    "(e.g. Gaming -> \"Steam\", Finance -> \"Statements\"); use \"\" if none fits. Reuse subfolder "
-    "names consistently too.\n"
-    "- Judge each full message (sender, subject, body), not just the subject.\n"
-    "- urgent=true only for genuinely time-sensitive items needing prompt action.\n\n"
+    _CLASSIFY_RULES + "\n\n"
+    "You will receive a NUMBERED LIST of emails. Classify EACH one independently, and be "
+    "CONSISTENT: emails that share a category must get the EXACT SAME folder name.\n\n"
     "Respond with ONLY a JSON array, no markdown fencing — one object per email, covering EVERY "
     "index exactly once, in this shape:\n"
-    '[{{"index": 1, "folder": "Broad Theme", "subfolder": "Specific or empty", "urgent": false, "reasoning": "short"}}, ...]'
+    '[{{"index": 1, "folder": "Category", "subfolder": "Specific or empty", "urgent": false, "reasoning": "short"}}, ...]'
 )
 
 
