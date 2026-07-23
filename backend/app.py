@@ -155,33 +155,23 @@ def get_folders():
         return {"folders": []}
 
     try:
-        raw_folders = graph.list_ai_folders(token, cfg["parent_folder_name"])
+        # graph.folders_with_details fans the whole overview out over ~3 batched round-trips.
         folders = []
-        for f in raw_folders:
-            # Count mail in the category AND its subfolders, so a category whose mail sits
-            # in subfolders isn't shown as empty.
-            subfolders = graph.folder_children(token, f["id"]) if f.get("childFolderCount", 0) else []
-            direct = f.get("totalItemCount", 0)
-            total = direct + sum(s.get("totalItemCount", 0) for s in subfolders)
-
-            last_messages = graph.list_messages_recursive(token, f["id"], top=1)
-            last_message = last_messages[0] if last_messages else None
+        for f in graph.folders_with_details(token, cfg["parent_folder_name"]):
+            last = f["last_message"]
             folders.append(
                 {
                     "id": f["id"],
-                    "name": f["displayName"],
-                    "count": total,
-                    "direct_count": direct,
-                    "subfolders": [
-                        {"id": s["id"], "name": s["displayName"], "count": s.get("totalItemCount", 0)}
-                        for s in subfolders
-                    ],
+                    "name": f["name"],
+                    "count": f["count"],
+                    "direct_count": f["direct_count"],
+                    "subfolders": f["subfolders"],
                     "last_message": {
-                        "subject": last_message.get("subject", ""),
-                        "received": last_message.get("receivedDateTime"),
-                        "sender_name": last_message.get("from", {}).get("emailAddress", {}).get("name", ""),
+                        "subject": last.get("subject", ""),
+                        "received": last.get("receivedDateTime"),
+                        "sender_name": last.get("from", {}).get("emailAddress", {}).get("name", ""),
                     }
-                    if last_message
+                    if last
                     else None,
                 }
             )

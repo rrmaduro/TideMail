@@ -229,26 +229,57 @@ export class FoldersComponent implements OnInit {
     return this.sorted().filter((f) => !q || f.name.toLowerCase().includes(q));
   });
 
+  private static readonly CACHE_KEY = 'tidemail.folders';
+
   ngOnInit(): void {
     this.api.getConfig().subscribe((c) => this.parent.set(c.parent_folder_name));
+    // Show the last-known folders instantly so navigating here never blocks on the network;
+    // the live request below refreshes them a moment later.
+    const cached = this.readCache();
+    if (cached?.length) {
+      this.folders.set(cached);
+      this.loading.set(false);
+    }
     this.reload();
   }
 
   reload(): void {
-    this.loading.set(true);
+    // Only show the skeleton when we have nothing to display yet — otherwise refresh quietly.
+    if (this.folders().length === 0) this.loading.set(true);
     this.error.set(null);
     this.api.getFolders().subscribe({
       next: (res) => {
         this.folders.set(res.folders);
+        this.writeCache(res.folders);
         this.loading.set(false);
         const sel = this.selected();
         if (sel && !res.folders.some((f) => f.id === sel.id)) this.close();
       },
       error: (err) => {
-        this.error.set(err?.error?.detail || 'Request failed. Is Outlook connected?');
+        // Keep any cached folders on screen; only surface an error if we have nothing.
+        if (this.folders().length === 0) {
+          this.error.set(err?.error?.detail || 'Request failed. Is Outlook connected?');
+        }
         this.loading.set(false);
       },
     });
+  }
+
+  private readCache(): FolderInfo[] | null {
+    try {
+      const raw = localStorage.getItem(FoldersComponent.CACHE_KEY);
+      return raw ? (JSON.parse(raw) as FolderInfo[]) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeCache(folders: FolderInfo[]): void {
+    try {
+      localStorage.setItem(FoldersComponent.CACHE_KEY, JSON.stringify(folders));
+    } catch {
+      /* storage full or unavailable — non-fatal, we just lose the instant-render */
+    }
   }
 
   dot(name: string): string {

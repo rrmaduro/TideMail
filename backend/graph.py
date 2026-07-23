@@ -5,6 +5,7 @@ import html
 import re
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -57,10 +58,19 @@ def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
+# One connection pool for the whole process. Reusing keep-alive connections avoids a fresh
+# TCP + TLS handshake on every Graph call — the dominant cost when loading folder info, which
+# fans out into dozens of small requests. httpx.Client is thread-safe, so it's also shared
+# across the worker threads that fetch folders concurrently.
+_client = httpx.Client(
+    timeout=30,
+    limits=httpx.Limits(max_keepalive_connections=20, max_connections=20),
+)
+
+
 def _request(method: str, path: str, token: str, **kwargs) -> dict:
     url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
-    with httpx.Client(timeout=30) as client:
-        resp = client.request(method, url, headers=_headers(token), **kwargs)
+    resp = _client.request(method, url, headers=_headers(token), **kwargs)
     if resp.status_code >= 400:
         try:
             message = resp.json().get("error", {}).get("message", resp.text)
@@ -70,6 +80,30 @@ def _request(method: str, path: str, token: str, **kwargs) -> dict:
     if resp.status_code == 204 or not resp.content:
         return {}
     return resp.json()
+
+
+def _batch_get(token: str, requests: list[tuple], chunk: int = 20) -> dict:
+    """Run many GET requests in as few round-trips as possible via Graph's JSON $batch.
+
+    `requests` is a list of (key, relative_url); returns {key: response_body} for every
+    request that came back < 400. Graph allows up to 20 sub-requests per $batch call and
+    may return them out of order, so we map results back by the id we assigned.
+    """
+    out: dict = {}
+    for i in range(0, len(requests), chunk):
+        part = requests[i : i + chunk]
+        payload = {
+            "requests": [{"id": str(j), "method": "GET", "url": url} for j, (_, url) in enumerate(part)]
+        }
+        data = _request("POST", "/$batch", token, json=payload)
+        for resp in data.get("responses", []):
+            try:
+                key = part[int(resp["id"])][0]
+            except (ValueError, IndexError, KeyError):
+                continue
+            if resp.get("status", 500) < 400:
+                out[key] = resp.get("body", {})
+    return out
 
 
 def _find_child_folder(token: str, parent_id: str, name: str) -> Optional[str]:
@@ -191,6 +225,73 @@ def list_ai_folders(token: str, parent_name: str) -> list[dict]:
     return _list_children(token, parent_id)
 
 
+def folders_with_details(token: str, parent_name: str) -> list[dict]:
+    """Full overview of the AI-Sorted categories for the Folders page, assembled in ~3
+    round-trips using $batch instead of dozens of sequential calls.
+
+    Returns, per top-level category (in Graph's order): id, name, direct_count, count
+    (direct + subfolders), subfolders [{id, name, count}], and last_message (the newest
+    message across the category and its subfolders, or None).
+    """
+    parent_id = ensure_parent_folder(token, parent_name)
+    cats = _list_children(token, parent_id)  # 1 call: names, counts, childFolderCount
+    if not cats:
+        return []
+
+    child_select = "id,displayName,totalItemCount,childFolderCount"
+    msg_query = f"$select={quote(MESSAGE_SELECT)}&$top=1&$orderby={quote('receivedDateTime desc')}"
+
+    # Phase A — one batch: children of every category that has any.
+    child_reqs = [
+        (c["id"], f"/me/mailFolders/{c['id']}/childFolders?$select={quote(child_select)}&$top=100")
+        for c in cats
+        if c.get("childFolderCount", 0)
+    ]
+    children_bodies = _batch_get(token, child_reqs)
+    subfolders_by_cat = {cid: body.get("value", []) for cid, body in children_bodies.items()}
+
+    # Phase B — one batch: newest message for each category folder and each non-empty subfolder.
+    msg_targets: list[tuple[str, str]] = []  # (owning category id, folder id to read)
+    for c in cats:
+        msg_targets.append((c["id"], c["id"]))
+        for s in subfolders_by_cat.get(c["id"], []):
+            if s.get("totalItemCount", 0):
+                msg_targets.append((c["id"], s["id"]))
+    msg_reqs = [
+        (idx, f"/me/mailFolders/{fid}/messages?{msg_query}") for idx, (_, fid) in enumerate(msg_targets)
+    ]
+    msg_bodies = _batch_get(token, msg_reqs)
+
+    newest: dict[str, dict] = {}
+    for idx, (cat_id, _) in enumerate(msg_targets):
+        vals = msg_bodies.get(idx, {}).get("value", [])
+        if not vals:
+            continue
+        m = vals[0]
+        cur = newest.get(cat_id)
+        if cur is None or m.get("receivedDateTime", "") > cur.get("receivedDateTime", ""):
+            newest[cat_id] = m
+
+    result: list[dict] = []
+    for c in cats:
+        subs = subfolders_by_cat.get(c["id"], [])
+        direct = c.get("totalItemCount", 0)
+        result.append(
+            {
+                "id": c["id"],
+                "name": c["displayName"],
+                "direct_count": direct,
+                "count": direct + sum(s.get("totalItemCount", 0) for s in subs),
+                "subfolders": [
+                    {"id": s["id"], "name": s["displayName"], "count": s.get("totalItemCount", 0)}
+                    for s in subs
+                ],
+                "last_message": newest.get(c["id"]),
+            }
+        )
+    return result
+
+
 def list_category_folder_ids(token: str, parent_name: str) -> list[str]:
     """IDs of the top-level category folders under the parent (not their subfolders)."""
     return [f["id"] for f in list_ai_folders(token, parent_name)]
@@ -302,12 +403,20 @@ def folder_children(token: str, folder_id: str) -> list[dict]:
     return _list_children(token, folder_id)
 
 
-def list_messages_recursive(token: str, folder_id: str, top: int = 15) -> list[dict]:
+def list_messages_recursive(
+    token: str, folder_id: str, top: int = 15, children: Optional[list[dict]] = None
+) -> list[dict]:
     """Newest messages from a folder AND its subfolders, so the emails 'under' a themed
-    folder are all accounted for when you open it."""
+    folder are all accounted for when you open it.
+
+    Pass `children` when the caller has already listed them (as /folders does) to skip a
+    redundant childFolders request.
+    """
     messages = list_messages_in_folder(token, folder_id, top)
     try:
-        for child in _list_children(token, folder_id):
+        if children is None:
+            children = _list_children(token, folder_id)
+        for child in children:
             if child.get("totalItemCount", 0):
                 messages.extend(list_messages_in_folder(token, child["id"], top))
     except GraphAPIError:
