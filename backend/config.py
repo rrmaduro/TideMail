@@ -53,7 +53,9 @@ class ConfigUpdate(BaseModel):
 def _read_json(path: Path) -> dict:
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    # utf-8-sig tolerates a byte-order mark, so a config.json saved by an external editor
+    # (e.g. some Windows tools add a BOM) still loads instead of crashing startup.
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _write_json(path: Path, data: dict) -> None:
