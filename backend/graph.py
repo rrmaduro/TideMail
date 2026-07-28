@@ -12,8 +12,10 @@ import httpx
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 MESSAGE_SELECT = "id,subject,from,receivedDateTime,bodyPreview,body,parentFolderId"
 
-# Well-known folders never scanned: they don't hold received mail worth sorting.
-EXCLUDE_WELLKNOWN = ["sentitems", "drafts", "outbox"]
+# Well-known folders never scanned: Sent/Drafts/Outbox aren't received mail, and Deleted
+# Items is mail the user threw away — re-sorting it back into folders would effectively
+# un-delete it (and waste tokens on trash).
+EXCLUDE_WELLKNOWN = ["sentitems", "drafts", "outbox", "deleteditems"]
 
 # In-memory folder name -> id cache, keyed by (parent_name, folder_name). Rebuilt lazily
 # from Graph on first use each process run; not worth persisting to disk.
@@ -215,7 +217,9 @@ def _list_children(token: str, folder_id: str) -> list[dict]:
         "GET",
         f"/me/mailFolders/{folder_id}/childFolders",
         token,
-        params={"$select": "id,displayName,totalItemCount,childFolderCount", "$top": "100"},
+        # parentFolderId is needed so callers can link a child back to its parent (e.g. to
+        # exclude a whole subtree from scanning); Graph omits it unless explicitly selected.
+        params={"$select": "id,displayName,totalItemCount,childFolderCount,parentFolderId", "$top": "100"},
     )
     return data.get("value", [])
 
@@ -343,9 +347,10 @@ def _wellknown_id(token: str, name: str) -> Optional[str]:
 def list_scan_messages(token: str, parent_name: str, max_total: int = 500) -> list[dict]:
     """Read messages to sort from EVERY folder in the mailbox, except:
       - Sent Items / Drafts / Outbox (not received mail), and
-      - the AI-Sorted sub-subfolders (already fully sorted — avoids needless re-work).
-    Top-level AI-Sorted category folders ARE read, so their mail can be refined into
-    subfolders. Each message carries `parentFolderId`, used to skip mail already in place.
+      - the ENTIRE AI-Sorted subtree (the parent plus its category folders and their
+        subfolders). Once an email is filed there it counts as already sorted, so future
+        scans never read it again — no re-classification, no wasted AI calls.
+    Mail is therefore classified once, when it is still outside the AI-Sorted tree.
     """
     all_folders = _walk_all_folders(token)
 
@@ -355,18 +360,24 @@ def list_scan_messages(token: str, parent_name: str, max_total: int = 500) -> li
         if fid:
             excluded.add(fid)
 
-    # Exclude the AI-Sorted subfolders (grandchildren of the parent), which are "done".
+    # Exclude the whole AI-Sorted subtree: anything already sorted stays untouched.
     try:
         parent_id = ensure_parent_folder(token, parent_name)
-        category_ids = {f["id"] for f in _list_children(token, parent_id)}
+        children_map: dict[Optional[str], list[str]] = {}
         for f in all_folders:
-            if f.get("parentFolderId") in category_ids:
-                excluded.add(f["id"])
+            children_map.setdefault(f.get("parentFolderId"), []).append(f["id"])
+        stack = [parent_id]
+        while stack:
+            fid = stack.pop()
+            if fid in excluded:
+                continue
+            excluded.add(fid)
+            stack.extend(children_map.get(fid, []))
     except GraphAPIError:
         pass
 
     # Scan the "incoming" folders first so they're covered before the message cap is hit.
-    priority = [pid for pid in (_wellknown_id(token, n) for n in ("inbox", "junkemail", "deleteditems")) if pid]
+    priority = [pid for pid in (_wellknown_id(token, n) for n in ("inbox", "junkemail")) if pid]
     priority_rank = {pid: i for i, pid in enumerate(priority)}
     all_folders.sort(key=lambda f: priority_rank.get(f["id"], len(priority) + 1))
 

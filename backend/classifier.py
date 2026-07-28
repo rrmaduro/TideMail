@@ -11,14 +11,60 @@ import httpx
 
 import graph
 
-# How much of the email body to send to the model. Enough to "read the whole email"
-# on typical messages while keeping token cost bounded on very long ones.
-MAX_BODY_CHARS = 6000
+# How much of the (cleaned) email body to send to the model. The body is stripped of
+# quoted history, footers and links first, so these caps apply to meaningful text only.
+MAX_BODY_CHARS = 4000
 
 # Batch classification: file many emails per API call. This is what lets a full-inbox scan
 # use few requests (e.g. 200 emails -> ~10 calls instead of 200) and stay under rate limits.
 BATCH_SIZE = 20
-BATCH_BODY_CHARS = 2500  # per email inside a batch — enough to judge the theme
+BATCH_BODY_CHARS = 1400  # per email inside a batch — plenty of cleaned text to judge the theme
+
+
+# Token savers: cut everything the model doesn't need to judge an email's theme. The prompt
+# already says to prioritize the newest message and ignore signatures/footers/tracking, so we
+# don't spend tokens sending them in the first place.
+_URL_RE = re.compile(r"https?://\S+")
+
+# Markers that begin a quoted reply / forwarded thread — everything from here down is history.
+_QUOTED_HISTORY_RES = [
+    re.compile(r"\n-{2,}\s*(original message|forwarded message)\s*-{2,}", re.I),
+    re.compile(r"\n_{5,}"),  # Outlook underscore separator that precedes the quoted headers
+    re.compile(r"\n\s*On .{0,150}?\bwrote:\s*(?:\n|$)", re.I),  # "On <date>, <name> wrote:"
+    re.compile(r"\n\s*(?:From|De|Von):\s.{0,200}?\n\s*(?:Sent|Enviad[oa]|Gesendet):\s", re.I),
+]
+
+# Footer/boilerplate markers. Only trimmed when they appear in the latter part of the body,
+# so a newsletter's top-of-email "view in browser" link never nukes the whole message.
+_FOOTER_RES = [
+    re.compile(r"\n[^\n]*\bunsubscribe\b", re.I),
+    re.compile(r"\n[^\n]*\bmanage (?:your )?(?:email )?preferences\b", re.I),
+    re.compile(r"\n[^\n]*\byou(?:'| a)?re receiving this\b", re.I),
+    re.compile(r"\n[^\n]*\bthis (?:e-?mail|message) was sent to\b", re.I),
+]
+
+
+def _clean_body(text: str) -> str:
+    """Reduce an email body to the meaningful text the classifier needs, to save tokens."""
+    if not text:
+        return ""
+    # Drop quoted reply/forward history at the earliest marker.
+    for rx in _QUOTED_HISTORY_RES:
+        m = rx.search(text)
+        if m:
+            text = text[: m.start()]
+    # Drop a trailing footer, but only if it starts past the first 40% (avoid top-of-email links).
+    guard = len(text) * 0.4
+    cut = len(text)
+    for rx in _FOOTER_RES:
+        m = rx.search(text)
+        if m and m.start() >= guard:
+            cut = min(cut, m.start())
+    text = text[:cut]
+    # The exact URL is noise for theme classification; keep just a marker that a link was there.
+    text = _URL_RE.sub("[link]", text)
+    text = re.sub(r"\n\s*\n\s*", "\n", text)  # collapse blank-line runs
+    return text.strip()
 
 PROVIDER_PRESETS = {
     "eden": {"label": "Eden AI", "base_url": "https://api.edenai.run/v2"},
@@ -298,8 +344,8 @@ def classify_email(email: dict, existing_folders: list[str], config: dict) -> Cl
     sender_line = f"{sender.get('name', '')} <{sender.get('address', '')}>".strip()
     subject = email.get("subject", "(no subject)")
 
-    # Read the full email: extract readable text from the HTML/text body, fall back to preview.
-    body_text = graph.html_to_text(email.get("body")) or email.get("bodyPreview", "")
+    # Read the email, then strip it to the meaningful text (no quoted history/footers/links).
+    body_text = _clean_body(graph.html_to_text(email.get("body")) or email.get("bodyPreview", ""))
     body_text = body_text[:MAX_BODY_CHARS]
 
     max_folders = config.get("max_folder_count", 10)
@@ -333,7 +379,7 @@ def _email_block(index: int, email: dict) -> str:
     sender = email.get("from", {}).get("emailAddress", {})
     sender_line = f"{sender.get('name', '')} <{sender.get('address', '')}>".strip()
     subject = email.get("subject", "(no subject)")
-    body_text = (graph.html_to_text(email.get("body")) or email.get("bodyPreview", ""))[:BATCH_BODY_CHARS]
+    body_text = _clean_body(graph.html_to_text(email.get("body")) or email.get("bodyPreview", ""))[:BATCH_BODY_CHARS]
     return f"[{index}] From: {sender_line}\nSubject: {subject}\nBody:\n{body_text}"
 
 
