@@ -240,6 +240,26 @@ def save_rules(doc: rules_module.RulesDoc):
     return rules_module.save(doc).model_dump()
 
 
+@api.get("/spam")
+def spam_count():
+    cfg = config_module.get_full_config()
+    try:
+        token = auth.get_token(cfg["client_id"])
+    except (auth.AuthNotConfigured, auth.AuthRequired):
+        return {"count": 0}
+    return {"count": graph.wellknown_count(token, "junkemail")}
+
+
+@api.post("/spam/clear")
+def clear_spam():
+    token = _folder_token()
+    try:
+        deleted = graph.empty_junk(token)
+    except graph.GraphAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"deleted": deleted, "count": graph.wellknown_count(token, "junkemail")}
+
+
 @api.post("/folders/cleanup")
 def cleanup_empty_folders():
     token = _folder_token()

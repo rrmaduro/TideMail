@@ -93,6 +93,12 @@ export class ApiService {
   cleanupFolders(): Observable<{ deleted: number }> {
     return this.http.post<{ deleted: number }>(`${this.base}/folders/cleanup`, {});
   }
+  spamCount(): Observable<{ count: number }> {
+    return this.http.get<{ count: number }>(`${this.base}/spam`);
+  }
+  clearSpam(): Observable<{ deleted: number; count: number }> {
+    return this.http.post<{ deleted: number; count: number }>(`${this.base}/spam/clear`, {});
+  }
 
   // --- config ---
   getConfig(): Observable<AppConfig> {

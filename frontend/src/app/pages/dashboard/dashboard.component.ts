@@ -30,8 +30,8 @@ import { RevealDirective } from '../../directives/reveal.directive';
         <span class="eyebrow">Dashboard</span>
         <h1>Your Inbox</h1>
         <p class="sub">
-          Sorts <strong>every</strong> email in your inbox into themed folders — one full pass.
-          @if (lastScan()) { <span class="last-scan">· Last sorted {{ lastScan() }}</span> }
+          Reorganizes your <strong>whole mailbox</strong> into themed folders and tidies up empties.
+          @if (lastScan()) { <span class="last-scan">· Last run {{ lastScan() }}</span> }
         </p>
       </div>
       <div class="head-actions">
@@ -45,12 +45,22 @@ import { RevealDirective } from '../../directives/reveal.directive';
             }
           </button>
         }
+        @if (spamCount() > 0 && !scanning()) {
+          <button class="btn btn-danger" (click)="clearSpam()" [disabled]="clearingSpam()">
+            @if (clearingSpam()) {
+              <span class="spinner spinner--dark" aria-hidden="true"></span> Clearing…
+            } @else {
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Clear spam ({{ spamCount() }})
+            }
+          </button>
+        }
         <button class="btn btn-accent scan-btn" (click)="scan()" [disabled]="scanning()">
           @if (scanning()) {
-            <span class="spinner" aria-hidden="true"></span> Sorting…
+            <span class="spinner" aria-hidden="true"></span> Reorganizing…
           } @else {
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            Sort entire inbox
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Reorganize everything
           }
         </button>
       </div>
@@ -349,6 +359,8 @@ export class DashboardComponent implements OnInit {
   foldersLoading = signal(true);
   undoCount = signal(0);
   undoing = signal(false);
+  spamCount = signal(0);
+  clearingSpam = signal(false);
   private folderCount = signal(0);
 
   pct = computed(() => {
@@ -379,6 +391,27 @@ export class DashboardComponent implements OnInit {
     this.poller.refreshNow();
     this.loadFolderCount();
     this.loadUndo();
+    this.loadSpam();
+  }
+
+  private loadSpam(): void {
+    this.api.spamCount().subscribe({ next: (r) => this.spamCount.set(r.count), error: () => {} });
+  }
+
+  clearSpam(): void {
+    if (!confirm(`Delete ${this.spamCount()} spam email(s)? They move to Deleted Items in Outlook (recoverable).`)) return;
+    this.clearingSpam.set(true);
+    this.actionError.set(null);
+    this.api.clearSpam().subscribe({
+      next: (r) => {
+        this.spamCount.set(r.count);
+        this.clearingSpam.set(false);
+      },
+      error: (err) => {
+        this.actionError.set(err?.error?.detail || 'Could not clear spam.');
+        this.clearingSpam.set(false);
+      },
+    });
   }
 
   private loadFolderCount(): void {

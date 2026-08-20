@@ -12,10 +12,10 @@ import httpx
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 MESSAGE_SELECT = "id,subject,from,receivedDateTime,bodyPreview,body,parentFolderId"
 
-# Well-known folders never scanned: Sent/Drafts/Outbox aren't received mail, and Deleted
-# Items is mail the user threw away — re-sorting it back into folders would effectively
-# un-delete it (and waste tokens on trash).
-EXCLUDE_WELLKNOWN = ["sentitems", "drafts", "outbox", "deleteditems"]
+# Well-known folders never scanned: Sent/Drafts/Outbox aren't received mail; Deleted Items
+# is mail the user threw away (re-sorting would un-delete it); Junk is spam, handled by
+# "Clear spam" rather than filed into themed folders.
+EXCLUDE_WELLKNOWN = ["sentitems", "drafts", "outbox", "deleteditems", "junkemail"]
 
 # In-memory folder name -> id cache, keyed by (parent_name, folder_name). Rebuilt lazily
 # from Graph on first use each process run; not worth persisting to disk.
@@ -434,6 +434,39 @@ def list_messages_recursive(
         pass
     messages.sort(key=lambda m: m.get("receivedDateTime", ""), reverse=True)
     return messages[:top]
+
+
+def wellknown_count(token: str, name: str) -> int:
+    try:
+        data = _request("GET", f"/me/mailFolders/{name}", token, params={"$select": "totalItemCount"})
+        return int(data.get("totalItemCount", 0))
+    except GraphAPIError:
+        return 0
+
+
+def empty_junk(token: str, max_delete: int = 2000) -> int:
+    """Delete all Junk Email messages. Graph's DELETE moves them to Deleted Items, so this
+    is a soft delete — recoverable — not a permanent purge. Returns how many were removed."""
+    ids: list[str] = []
+    next_url: Optional[str] = "/me/mailFolders/junkemail/messages"
+    params: Optional[dict] = {"$top": "100", "$select": "id"}
+    while next_url and len(ids) < max_delete:
+        try:
+            data = _request("GET", next_url, token, params=params)
+        except GraphAPIError:
+            break
+        ids.extend(m["id"] for m in data.get("value", []))
+        next_url = data.get("@odata.nextLink")
+        params = None
+
+    deleted = 0
+    for mid in ids[:max_delete]:
+        try:
+            _request("DELETE", f"/me/messages/{mid}", token)
+            deleted += 1
+        except GraphAPIError:
+            pass
+    return deleted
 
 
 def rename_folder(token: str, folder_id: str, new_name: str) -> dict:
