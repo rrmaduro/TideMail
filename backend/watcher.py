@@ -180,27 +180,75 @@ def _chunks(items: list, size: int):
         yield items[i : i + size]
 
 
-async def _file_message(
-    token: str,
-    message: dict,
-    result,
-    parent_folder_name: str,
-    max_folders: int,
-    existing_folders: list[str],
-    overflow_folder: str = OVERFLOW_FOLDER,
-) -> Optional[dict]:
-    """File a classified message into `AI Sorted / Category [/ Subcategory]`.
+class _Taxonomy:
+    """Tracks the AI-Sorted folder tree during a scan and resolves each classification to a
+    target that keeps the total folder count within the cap.
 
-    Returns the logged activity entry, or None if the message is already in its target
-    folder (nothing to do). Isolated so one failed move never aborts the batch or scan.
+    Resolution order when a proposed folder is new and the cap is reached:
+      1. if the category exists, flatten (file into the category, no new subfolder);
+      2. else file into the overflow folder (creating it only if that still fits);
+      3. else file into an existing category (never exceed the cap).
     """
-    category = result.folder
-    if category not in existing_folders and len(existing_folders) >= max_folders:
-        category = overflow_folder  # top-level category cap reached
-    if category not in existing_folders:
-        existing_folders.append(category)
 
-    subcategory = getattr(result, "subfolder", "") or ""
+    def __init__(self, taxonomy: list[dict], max_total: int, max_categories: int, overflow: str):
+        self._subs: dict[str, set[str]] = {}   # category(lower) -> {subfolder(lower)}
+        self._display: dict[str, str] = {}     # category(lower) -> original display name
+        for cat in taxonomy:
+            cl = cat["name"].lower()
+            self._subs[cl] = {s["name"].lower() for s in cat["subfolders"]}
+            self._display[cl] = cat["name"]
+        self.max_total = max(1, max_total)
+        self.max_categories = max(1, max_categories)
+        self.overflow = overflow or "Misc"
+
+    @property
+    def count(self) -> int:
+        return sum(1 + len(subs) for subs in self._subs.values())
+
+    def _add_category(self, category: str) -> None:
+        self._subs[category.lower()] = set()
+        self._display[category.lower()] = category
+
+    def resolve(self, category: str, subcategory: str) -> tuple[str, str]:
+        category = (category or "Uncategorized").strip()[:60] or "Uncategorized"
+        subcategory = (subcategory or "").strip()[:60]
+        if subcategory.lower() == category.lower():
+            subcategory = ""
+        cl = category.lower()
+
+        if cl in self._subs:  # category already exists
+            if not subcategory or subcategory.lower() in self._subs[cl]:
+                return self._display[cl], (subcategory if subcategory and subcategory.lower() in self._subs[cl] else "")
+            if self.count + 1 <= self.max_total:  # room for the new subfolder
+                self._subs[cl].add(subcategory.lower())
+                return self._display[cl], subcategory
+            return self._display[cl], ""  # cap reached — flatten into the category
+
+        # category is new
+        need = 1 + (1 if subcategory else 0)
+        if len(self._subs) < self.max_categories and self.count + need <= self.max_total:
+            self._add_category(category)
+            if subcategory:
+                self._subs[cl].add(subcategory.lower())
+            return category, subcategory
+
+        # can't add a new category — route to overflow, or an existing category if even that won't fit
+        ol = self.overflow.lower()
+        if ol in self._subs:
+            return self._display[ol], ""
+        if self.count + 1 <= self.max_total:
+            self._add_category(self.overflow)
+            return self.overflow, ""
+        # completely full: reuse the first existing category
+        first = next(iter(self._display.values()))
+        return first, ""
+
+
+async def _file_message(token: str, message: dict, result, parent_folder_name: str) -> Optional[dict]:
+    """File a classified message into `AI Sorted / Category [/ Subcategory]` (already resolved
+    to fit the folder cap). Returns the logged entry, or None if it's already in place."""
+    category = (result.folder or "Uncategorized").strip()
+    subcategory = (getattr(result, "subfolder", "") or "").strip()
     display = category + (f" / {subcategory}" if subcategory and subcategory.lower() != category.lower() else "")
 
     source_id = message.get("parentFolderId")
@@ -226,8 +274,13 @@ async def _file_message(
     }
 
 
-async def run_scan() -> dict:
-    """Full scan: read every message currently in the inbox, classify, move, log."""
+async def run_scan(reevaluate: bool = False) -> dict:
+    """Sort mail into themed folders.
+
+    reevaluate=False (incremental): only mail outside the AI-Sorted tree is read.
+    reevaluate=True (Reorganize everything): re-read and re-classify the whole mailbox,
+    moving already-filed mail as the taxonomy shifts, within a hard total-folder cap.
+    """
     if _scan_lock.locked():
         raise ScanInProgress("A scan is already running")
 
@@ -248,12 +301,17 @@ async def run_scan() -> dict:
             max_folders = cfg["max_folder_count"]
             overflow_folder = cfg.get("overflow_folder_name") or OVERFLOW_FOLDER
             max_scan = cfg.get("max_scan_messages", MAX_SCAN_MESSAGES)
+            max_total_folders = cfg.get("max_total_folders", 25)
 
-            # Read across the whole mailbox: Inbox, Junk Email, Deleted Items, and the existing
-            # category folders (so already-sorted mail can be refined into subfolders).
-            messages = await asyncio.to_thread(graph.list_scan_messages, token, parent_folder_name, max_scan)
-            existing_raw = await asyncio.to_thread(graph.list_ai_folders, token, parent_folder_name)
-            existing_folders = [f["displayName"] for f in existing_raw]
+            messages = await asyncio.to_thread(
+                graph.list_scan_messages, token, parent_folder_name, max_scan, reevaluate
+            )
+            # Build the taxonomy resolver from the current folder tree — it keeps the total
+            # folder count (categories + subfolders) within the cap as mail is filed.
+            taxonomy = await asyncio.to_thread(graph.list_ai_taxonomy, token, parent_folder_name)
+            # One hard cap on the total folder count; categories may use all of it.
+            resolver = _Taxonomy(taxonomy, max_total_folders, max_total_folders, overflow_folder)
+            existing_folders = [c["name"] for c in taxonomy]
 
             _state["progress"]["total"] = len(messages)
             sorted_count = 0
@@ -292,16 +350,15 @@ async def run_scan() -> dict:
                 pin = rules_module.match(message, rules_doc)
                 if pin:
                     _state["progress"]["current"] = message.get("subject", "(no subject)")
+                    cat, sub = resolver.resolve(pin.folder, pin.subfolder)
                     result = classifier.ClassificationResult(
-                        folder=pin.folder,
-                        subfolder=pin.subfolder,
+                        folder=cat,
+                        subfolder=sub,
                         urgent=False,
                         reasoning=f"Matched your rule: {pin.type} “{pin.value}”",
                         raw="",
                     )
-                    _record(await _file_message(
-                        token, message, result, parent_folder_name, max_folders, existing_folders, overflow_folder
-                    ))
+                    _record(await _file_message(token, message, result, parent_folder_name))
                     _state["progress"]["scanned"] += 1
                 else:
                     to_classify.append(message)
@@ -323,9 +380,8 @@ async def run_scan() -> dict:
                     if result is None:
                         entry = _error_entry(message, batch_error or "AI did not classify this email")
                     else:
-                        entry = await _file_message(
-                            token, message, result, parent_folder_name, max_folders, existing_folders, overflow_folder
-                        )
+                        result.folder, result.subfolder = resolver.resolve(result.folder, result.subfolder)
+                        entry = await _file_message(token, message, result, parent_folder_name)
 
                     _state["progress"]["scanned"] += 1
                     _record(entry)  # None = already in the right folder, nothing to do

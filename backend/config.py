@@ -27,6 +27,7 @@ class AppConfig(BaseModel):
     overflow_folder_name: str = "Misc"
     auto_scan: bool = False
     delete_empty_folders: bool = True
+    max_total_folders: int = Field(default=25, ge=3, le=200)  # hard cap: categories + subfolders
 
 
 class Secrets(BaseModel):
@@ -47,6 +48,7 @@ class ConfigUpdate(BaseModel):
     overflow_folder_name: Optional[str] = None
     auto_scan: Optional[bool] = None
     delete_empty_folders: Optional[bool] = None
+    max_total_folders: Optional[int] = Field(default=None, ge=3, le=200)
     api_key: Optional[str] = None
 
 

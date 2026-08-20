@@ -301,6 +301,22 @@ def list_category_folder_ids(token: str, parent_name: str) -> list[str]:
     return [f["id"] for f in list_ai_folders(token, parent_name)]
 
 
+def list_ai_taxonomy(token: str, parent_name: str) -> list[dict]:
+    """Full AI-Sorted tree: [{name, id, subfolders: [{name, id}]}] — categories and their
+    subfolders. Used to enforce the total-folder cap during a reorganize."""
+    taxonomy = []
+    for cat in list_ai_folders(token, parent_name):
+        subs = _list_children(token, cat["id"]) if cat.get("childFolderCount", 0) else []
+        taxonomy.append(
+            {
+                "name": cat["displayName"],
+                "id": cat["id"],
+                "subfolders": [{"name": s["displayName"], "id": s["id"]} for s in subs],
+            }
+        )
+    return taxonomy
+
+
 def _read_folder_messages(token: str, ref: str, remaining: int, page_size: int = 50) -> list[dict]:
     messages: list[dict] = []
     next_url: Optional[str] = f"/me/mailFolders/{ref}/messages"
@@ -344,13 +360,17 @@ def _wellknown_id(token: str, name: str) -> Optional[str]:
         return None
 
 
-def list_scan_messages(token: str, parent_name: str, max_total: int = 500) -> list[dict]:
-    """Read messages to sort from EVERY folder in the mailbox, except:
-      - Sent Items / Drafts / Outbox (not received mail), and
-      - the ENTIRE AI-Sorted subtree (the parent plus its category folders and their
-        subfolders). Once an email is filed there it counts as already sorted, so future
-        scans never read it again — no re-classification, no wasted AI calls.
-    Mail is therefore classified once, when it is still outside the AI-Sorted tree.
+def list_scan_messages(
+    token: str, parent_name: str, max_total: int = 500, reevaluate: bool = False
+) -> list[dict]:
+    """Read messages to sort from across the mailbox, except Sent Items / Drafts / Outbox /
+    Junk / Deleted Items (see EXCLUDE_WELLKNOWN).
+
+    Incremental (reevaluate=False): also skip the ENTIRE AI-Sorted subtree, so mail already
+    filed is never re-read — classified once, no wasted AI calls.
+
+    Reorganize (reevaluate=True): INCLUDE the AI-Sorted subtree, so every email — even ones
+    already in folders — is re-classified and can be moved as the taxonomy changes.
     """
     all_folders = _walk_all_folders(token)
 
@@ -360,21 +380,28 @@ def list_scan_messages(token: str, parent_name: str, max_total: int = 500) -> li
         if fid:
             excluded.add(fid)
 
-    # Exclude the whole AI-Sorted subtree: anything already sorted stays untouched.
-    try:
-        parent_id = ensure_parent_folder(token, parent_name)
-        children_map: dict[Optional[str], list[str]] = {}
-        for f in all_folders:
-            children_map.setdefault(f.get("parentFolderId"), []).append(f["id"])
-        stack = [parent_id]
-        while stack:
-            fid = stack.pop()
-            if fid in excluded:
-                continue
-            excluded.add(fid)
-            stack.extend(children_map.get(fid, []))
-    except GraphAPIError:
-        pass
+    if not reevaluate:
+        # Exclude the whole AI-Sorted subtree: anything already sorted stays untouched.
+        try:
+            parent_id = ensure_parent_folder(token, parent_name)
+            children_map: dict[Optional[str], list[str]] = {}
+            for f in all_folders:
+                children_map.setdefault(f.get("parentFolderId"), []).append(f["id"])
+            stack = [parent_id]
+            while stack:
+                fid = stack.pop()
+                if fid in excluded:
+                    continue
+                excluded.add(fid)
+                stack.extend(children_map.get(fid, []))
+        except GraphAPIError:
+            pass
+    else:
+        # Reorganize: only the parent folder itself is skipped (it holds no direct mail).
+        try:
+            excluded.add(ensure_parent_folder(token, parent_name))
+        except GraphAPIError:
+            pass
 
     # Scan the "incoming" folders first so they're covered before the message cap is hit.
     priority = [pid for pid in (_wellknown_id(token, n) for n in ("inbox", "junkemail")) if pid]

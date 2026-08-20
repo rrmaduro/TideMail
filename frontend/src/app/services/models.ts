@@ -14,6 +14,7 @@ export interface AppConfig {
   overflow_folder_name: string;
   auto_scan: boolean;
   delete_empty_folders: boolean;
+  max_total_folders: number;
   ai_configured?: boolean;
   authenticated?: boolean;
   data_dir?: string;
@@ -31,6 +32,7 @@ export interface ConfigUpdate {
   overflow_folder_name?: string;
   auto_scan?: boolean;
   delete_empty_folders?: boolean;
+  max_total_folders?: number;
   api_key?: string;
 }
 

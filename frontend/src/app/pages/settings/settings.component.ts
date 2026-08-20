@@ -97,8 +97,9 @@ const PROVIDER_BASE: Record<AiProvider, string> = {
       </div>
       <div class="grid-2">
         <div class="field">
-          <label for="maxFolders">Max folders — {{ maxFolders() }}</label>
-          <input id="maxFolders" type="range" min="1" max="50" [ngModel]="maxFolders()" (ngModelChange)="maxFolders.set(+$event)" />
+          <label for="maxTotal">Maximum folders total — {{ maxTotal() }}</label>
+          <input id="maxTotal" type="range" min="3" max="60" [ngModel]="maxTotal()" (ngModelChange)="maxTotal.set(+$event)" />
+          <span class="hint">Hard cap on categories + subfolders. Reorganize won't exceed it.</span>
         </div>
         <div class="field">
           <label for="maxScan">Max emails per scan — {{ maxScan() }}</label>
@@ -184,6 +185,7 @@ export class SettingsComponent implements OnInit {
   model = signal('');
   interval = signal(5);
   maxFolders = signal(10);
+  maxTotal = signal(25);
   parentFolder = signal('AI Sorted');
   overflowFolder = signal('Misc');
   maxScan = signal(500);
@@ -205,6 +207,7 @@ export class SettingsComponent implements OnInit {
       this.model.set(c.model);
       this.interval.set(c.check_interval_minutes);
       this.maxFolders.set(c.max_folder_count);
+      this.maxTotal.set(c.max_total_folders ?? 25);
       this.parentFolder.set(c.parent_folder_name);
       this.overflowFolder.set(c.overflow_folder_name ?? 'Misc');
       this.maxScan.set(c.max_scan_messages ?? 500);
@@ -252,6 +255,7 @@ export class SettingsComponent implements OnInit {
       model: this.model().trim(),
       check_interval_minutes: this.interval(),
       max_folder_count: this.maxFolders(),
+      max_total_folders: this.maxTotal(),
       parent_folder_name: this.parentFolder().trim() || 'AI Sorted',
       overflow_folder_name: this.overflowFolder().trim() || 'Misc',
       max_scan_messages: this.maxScan(),

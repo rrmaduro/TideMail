@@ -85,9 +85,10 @@ async def stop_watcher():
 
 @api.post("/run-now")
 @api.post("/scan")
-async def run_scan():
+async def run_scan(reevaluate: bool = True):
+    # "Reorganize everything" re-evaluates the whole mailbox by default.
     try:
-        result = await watcher.run_scan()
+        result = await watcher.run_scan(reevaluate=reevaluate)
     except watcher.ScanInProgress as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (auth.AuthNotConfigured, auth.AuthRequired) as exc:
